@@ -10,15 +10,22 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Shared Master Color Palette for Trade Cycles
 const CYCLE_COLORS = [
-  { bg: '#e3f2fd', border: '#1976d2' }, // Cycle 1: Blue
-  { bg: '#f3e5f5', border: '#7b1fa2' }, // Cycle 2: Purple
-  { bg: '#fff3e0', border: '#f57c00' }, // Cycle 3: Orange
-  { bg: '#e8f5e9', border: '#388e3c' }, // Cycle 4: Green
-  { bg: '#ffebee', border: '#d32f2f' }, // Cycle 5: Red
-  { bg: '#e0f7fa', border: '#0097a7' }, // Cycle 6: Cyan
+  { bg: '#e3f2fd', border: '#1976d2' }, 
+  { bg: '#f3e5f5', border: '#7b1fa2' }, 
+  { bg: '#fff3e0', border: '#f57c00' }, 
+  { bg: '#e8f5e9', border: '#388e3c' }, 
+  { bg: '#ffebee', border: '#d32f2f' }, 
+  { bg: '#e0f7fa', border: '#0097a7' }, 
 ];
 
 export default function App() {
+  // ==========================================
+  // NEW: AUTHENTICATION STATE
+  // ==========================================
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [authError, setAuthError] = useState(false);
+
   const [trades, setTrades] = useState([]);
   const [analyzedTrades, setAnalyzedTrades] = useState([]);
   
@@ -41,6 +48,20 @@ export default function App() {
   const chartRef = useRef(null);
   const seriesRef = useRef(null);
   const markersRef = useRef(null); 
+
+  // ==========================================
+  // NEW: LOGIN HANDLER
+  // ==========================================
+  const handleLogin = (e) => {
+    e.preventDefault();
+    if (passwordInput === import.meta.env.VITE_APP_PASSWORD) {
+      setIsAuthenticated(true);
+      setAuthError(false);
+    } else {
+      setAuthError(true);
+      setPasswordInput('');
+    }
+  };
 
   const fetchStopsFromDB = async () => {
     try {
@@ -92,10 +113,13 @@ export default function App() {
     }
   };
 
+  // Only fetch data from DB if the user is authenticated
   useEffect(() => {
-    fetchTradesFromDB();
-    fetchStopsFromDB();
-  }, [startDate, endDate]);
+    if (isAuthenticated) {
+      fetchTradesFromDB();
+      fetchStopsFromDB();
+    }
+  }, [startDate, endDate, isAuthenticated]);
 
   const syncStopPrice = async (posId, price) => {
     const val = parseFloat(price);
@@ -294,9 +318,6 @@ export default function App() {
         
         for (let i = 0; i < uniqueOpenTickers.length; i++) {
           const ticker = uniqueOpenTickers[i];
-          
-          // UPDATED: Using Vercel Rewrite route instead of corsproxy.io
-          // When running locally, Vite handles this. In prod, Vercel handles it.
           const fetchUrl = import.meta.env.PROD 
             ? `/api/yahoo/${ticker}?interval=1d&range=5d`
             : `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`)}`;
@@ -331,7 +352,8 @@ export default function App() {
   }, [trades]);
 
   useEffect(() => {
-    if (chartContainerRef.current) {
+    // Only initialize the chart if the user is authenticated and the container exists
+    if (isAuthenticated && chartContainerRef.current) {
       const chart = createChart(chartContainerRef.current, {
         width: chartContainerRef.current.clientWidth,
         height: 500,
@@ -345,7 +367,7 @@ export default function App() {
       seriesRef.current = candlestickSeries;
       return () => { chart.remove(); markersRef.current = null; };
     }
-  }, []);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (!selectedTicker || !seriesRef.current) return;
@@ -353,8 +375,6 @@ export default function App() {
       const tickerTrades = analyzedTrades.filter((t) => t.ticker === selectedTicker);
       if (tickerTrades.length === 0) return;
       try {
-        
-        // UPDATED: Using Vercel Rewrite route for historical chart data
         const fetchUrl = import.meta.env.PROD 
             ? `/api/yahoo/${selectedTicker}?interval=1d&range=1y`
             : `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${selectedTicker}?interval=1d&range=1y`)}`;
@@ -445,6 +465,39 @@ export default function App() {
 
   const uniqueTickers = [...new Set(trades.map(t => t.ticker))].sort();
 
+
+  // ==========================================
+  // NEW: CONDITIONAL RENDER FOR LOGIN SCREEN
+  // ==========================================
+  if (!isAuthenticated) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', backgroundColor: '#f5f5f5', fontFamily: 'sans-serif' }}>
+        <form onSubmit={handleLogin} style={{ padding: '40px', backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', textAlign: 'center', maxWidth: '320px', width: '100%' }}>
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '15px' }}>
+            <div style={{ width: '40px', height: '40px', backgroundColor: '#1565c0', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+            </div>
+          </div>
+          <h2 style={{ margin: '0 0 25px 0', color: '#333' }}>Trade Visualizer</h2>
+          <input
+            type="password"
+            value={passwordInput}
+            onChange={(e) => setPasswordInput(e.target.value)}
+            placeholder="Enter Access Code"
+            style={{ width: '100%', padding: '12px', marginBottom: '15px', border: '1px solid #ccc', borderRadius: '4px', boxSizing: 'border-box', fontSize: '14px' }}
+          />
+          {authError && <p style={{ color: '#d32f2f', fontSize: '13px', margin: '0 0 15px 0', fontWeight: 'bold' }}>Incorrect password.</p>}
+          <button type="submit" style={{ width: '100%', padding: '12px', backgroundColor: '#1565c0', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px', transition: 'background-color 0.2s' }}>
+            Access Dashboard
+          </button>
+        </form>
+      </div>
+    );
+  }
+
+  // ==========================================
+  // EXISTING DASHBOARD RENDER
+  // ==========================================
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', fontFamily: 'sans-serif' }}>
       
@@ -465,6 +518,8 @@ export default function App() {
           </div>
           <div style={{ borderLeft: '2px solid #ddd', height: '24px' }}></div>
           <input type="file" accept=".csv" onChange={handleFileUpload} />
+          
+          <button onClick={() => setIsAuthenticated(false)} style={{ padding: '6px 12px', backgroundColor: '#f44336', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>Lock</button>
         </div>
       </div>
 

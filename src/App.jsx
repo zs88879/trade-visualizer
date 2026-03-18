@@ -25,10 +25,7 @@ export default function App() {
   const [selectedTicker, setSelectedTicker] = useState(null);
   const [tickerStats, setTickerStats] = useState({}); 
   const [dayOfWeekStats, setDayOfWeekStats] = useState({}); 
-  
-  // NEW: State to hold our aggregated monthly data
   const [monthlyStats, setMonthlyStats] = useState({}); 
-
   const [showClosedPositions, setShowClosedPositions] = useState(true);
   
   const [startDate, setStartDate] = useState('');
@@ -150,7 +147,6 @@ export default function App() {
             const { error: insertError } = await supabase.from('trades').insert(dbTrades);
             if (insertError) throw insertError;
 
-            console.log("Successfully synced with Supabase!");
             alert("Trades successfully synced!");
             fetchTradesFromDB(); 
 
@@ -175,7 +171,7 @@ export default function App() {
     }
 
     const stats = {};
-    const mStats = {}; // Temporary object for monthly stats
+    const mStats = {}; 
     const positionCounters = {}; 
     const enrichedTradesList = [];
     
@@ -234,10 +230,9 @@ export default function App() {
         if (pl > 0) { s.grossProfit += pl; s.winningTrades++; }
         else { s.grossLoss += Math.abs(pl); s.losingTrades++; }
 
-        // NEW: Calculate Monthly Stats based on the date of this specific sell
         const yyyy = tradeDate.getFullYear();
         const mm = String(tradeDate.getMonth() + 1).padStart(2, '0');
-        const monthKey = `${yyyy}-${mm}`; // e.g., "2024-03"
+        const monthKey = `${yyyy}-${mm}`; 
 
         if (!mStats[monthKey]) {
           mStats[monthKey] = { 
@@ -289,7 +284,7 @@ export default function App() {
     });
 
     setDayOfWeekStats(dStats);
-    setMonthlyStats(mStats); // Save our new monthly tallies to state
+    setMonthlyStats(mStats); 
     setAnalyzedTrades(enrichedTradesList);
 
     const fetchCurrentPrices = async () => {
@@ -299,12 +294,15 @@ export default function App() {
         
         for (let i = 0; i < uniqueOpenTickers.length; i++) {
           const ticker = uniqueOpenTickers[i];
-          const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`;
-          // const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(yahooUrl)}`;
-          const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`;
+          
+          // UPDATED: Using Vercel Rewrite route instead of corsproxy.io
+          // When running locally, Vite handles this. In prod, Vercel handles it.
+          const fetchUrl = import.meta.env.PROD 
+            ? `/api/yahoo/${ticker}?interval=1d&range=5d`
+            : `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`)}`;
           
           try {
-            const res = await fetch(proxyUrl);
+            const res = await fetch(fetchUrl);
             const data = await res.json();
             if (data.chart && data.chart.result && data.chart.result.length > 0) {
               const quote = data.chart.result[0].indicators.quote[0];
@@ -355,9 +353,13 @@ export default function App() {
       const tickerTrades = analyzedTrades.filter((t) => t.ticker === selectedTicker);
       if (tickerTrades.length === 0) return;
       try {
-        const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${selectedTicker}?interval=1d&range=1y`;
-        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(yahooUrl)}`;
-        const response = await fetch(proxyUrl);
+        
+        // UPDATED: Using Vercel Rewrite route for historical chart data
+        const fetchUrl = import.meta.env.PROD 
+            ? `/api/yahoo/${selectedTicker}?interval=1d&range=1y`
+            : `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${selectedTicker}?interval=1d&range=1y`)}`;
+
+        const response = await fetch(fetchUrl);
         const data = await response.json();
 
         if (data.chart && data.chart.result && data.chart.result.length > 0) {
@@ -420,9 +422,6 @@ export default function App() {
   const globalTotalDaysHeld = statsArray.reduce((sum, stat) => sum + stat.totalDaysHeld, 0);
   const globalSharesClosed = statsArray.reduce((sum, stat) => sum + stat.sharesClosed, 0);
   const globalAvgDaysHeld = globalSharesClosed > 0 ? (globalTotalDaysHeld / globalSharesClosed).toFixed(1) : 0;
-
-  const bestTrade = statsArray.length > 0 ? statsArray.reduce((max, stat) => stat.realizedPL > max.realizedPL ? stat : max, statsArray[0]) : { ticker: '--', realizedPL: 0 };
-  const worstTrade = statsArray.length > 0 ? statsArray.reduce((min, stat) => stat.realizedPL < min.realizedPL ? stat : min, statsArray[0]) : { ticker: '--', realizedPL: 0 };
 
   const totalOpenHeat = statsArray.reduce((sum, stat) => {
     if (stat.qty > 0) {
@@ -900,7 +899,7 @@ export default function App() {
           </div>
 
           {/* ========================================= */}
-          {/* NEW: MONTHLY VIEW TAB                 */}
+          {/* MONTHLY VIEW TAB                 */}
           {/* ========================================= */}
           <div style={{ display: activeTab === 'monthly' ? 'block' : 'none', overflowX: 'auto' }}>
             {Object.keys(monthlyStats).length === 0 ? (
@@ -920,7 +919,6 @@ export default function App() {
                 </thead>
                 <tbody>
                   {Object.values(monthlyStats)
-                    // Sort descending: newest month at the top
                     .sort((a, b) => b.monthKey.localeCompare(a.monthKey))
                     .map((stat, index) => {
                       

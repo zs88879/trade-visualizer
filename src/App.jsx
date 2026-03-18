@@ -300,7 +300,8 @@ export default function App() {
         for (let i = 0; i < uniqueOpenTickers.length; i++) {
           const ticker = uniqueOpenTickers[i];
           const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`;
-          const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(yahooUrl)}`;
+          // const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(yahooUrl)}`;
+          const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`;
           
           try {
             const res = await fetch(proxyUrl);

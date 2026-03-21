@@ -38,8 +38,6 @@ export default function App() {
   const [historyFilter, setHistoryFilter] = useState('All');
   const [portfolioFilter, setPortfolioFilter] = useState('All');
   const [riskPrices, setRiskPrices] = useState({});
-  
-  // NEW: State to hold notes for each trade cycle
   const [tradeNotes, setTradeNotes] = useState({});
 
   const [activeTab, setActiveTab] = useState('chart');
@@ -48,6 +46,17 @@ export default function App() {
   const chartRef = useRef(null);
   const seriesRef = useRef(null);
   const markersRef = useRef(null); 
+
+  // ==========================================
+  // NEW: POSITION SIZE CALCULATOR STATE
+  // ==========================================
+  const [isCalcModalOpen, setIsCalcModalOpen] = useState(false);
+  const [calcTicker, setCalcTicker] = useState('');
+  const [calcTotalCapital, setCalcTotalCapital] = useState('');
+  const [calcPositionPct, setCalcPositionPct] = useState('');
+  const [calcEntryPrice, setCalcEntryPrice] = useState('');
+  const [calcStopLoss, setCalcStopLoss] = useState('');
+  const [isFetchingPrice, setIsFetchingPrice] = useState(false);
 
   const handleLogin = (e) => {
     e.preventDefault();
@@ -77,7 +86,6 @@ export default function App() {
     }
   };
 
-  // NEW: Fetch notes from database
   const fetchNotesFromDB = async () => {
     try {
       const { data, error } = await supabase.from('trade_notes').select('*');
@@ -132,7 +140,7 @@ export default function App() {
     if (isAuthenticated) {
       fetchTradesFromDB();
       fetchStopsFromDB();
-      fetchNotesFromDB(); // Initialize notes on login
+      fetchNotesFromDB(); 
     }
   }, [startDate, endDate, isAuthenticated]);
 
@@ -158,7 +166,6 @@ export default function App() {
     }
   };
 
-  // NEW: Sync notes back to Supabase automatically
   const syncTradeNote = async (posId, note) => {
     try {
       if (!note || note.trim() === '') {
@@ -459,6 +466,33 @@ export default function App() {
     fetchMarketData();
   }, [selectedTicker, analyzedTrades]);
 
+  // ==========================================
+  // NEW: FETCH LIVE PRICE FOR CALCULATOR
+  // ==========================================
+  const handleCalcTickerBlur = async () => {
+    if (!calcTicker) return;
+    setIsFetchingPrice(true);
+    try {
+      const ticker = calcTicker.toUpperCase();
+      const fetchUrl = import.meta.env.PROD 
+        ? `/api/yahoo/${ticker}?interval=1d&range=5d`
+        : `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`)}`;
+      
+      const res = await fetch(fetchUrl);
+      const data = await res.json();
+      if (data.chart && data.chart.result && data.chart.result.length > 0) {
+        const quote = data.chart.result[0].indicators.quote[0];
+        const closes = quote.close.filter(c => c !== null && c !== undefined);
+        if (closes.length > 0) {
+          setCalcEntryPrice(closes[closes.length - 1].toFixed(2));
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching price for calculator:", error);
+    }
+    setIsFetchingPrice(false);
+  };
+
   // --- GLOBAL ANALYTICS CALCULATIONS ---
   const statsArray = Object.values(tickerStats);
   const winningPositions = statsArray.filter(stat => stat.realizedPL > 0);
@@ -497,6 +531,28 @@ export default function App() {
 
   const uniqueTickers = [...new Set(trades.map(t => t.ticker))].sort();
 
+  // ==========================================
+  // NEW: POSITION SIZE MATH COMPUTATIONS
+  // ==========================================
+  const parsedTotalCapital = parseFloat(calcTotalCapital) || 0;
+  const parsedPositionPct = parseFloat(calcPositionPct) || 0;
+  const parsedEntryPrice = parseFloat(calcEntryPrice) || 0;
+  const parsedStopLoss = parseFloat(calcStopLoss) || 0;
+
+  const calcCapitalAllocated = parsedTotalCapital * (parsedPositionPct / 100);
+  const calcShares = parsedEntryPrice > 0 ? Math.floor(calcCapitalAllocated / parsedEntryPrice) : 0;
+
+  let calcOpenRiskDollar = 0;
+  let calcOpenRiskPct = 0;
+
+  if (parsedEntryPrice > 0 && parsedStopLoss > 0 && parsedEntryPrice > parsedStopLoss) {
+    calcOpenRiskDollar = calcShares * (parsedEntryPrice - parsedStopLoss);
+    if (parsedTotalCapital > 0) {
+      calcOpenRiskPct = (calcOpenRiskDollar / parsedTotalCapital) * 100;
+    }
+  }
+
+
   if (!isAuthenticated) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', backgroundColor: '#f5f5f5', fontFamily: 'sans-serif' }}>
@@ -530,6 +586,18 @@ export default function App() {
       <div style={{ padding: '15px 20px', backgroundColor: '#f5f5f5', borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '15px' }}>
         <h2 style={{ margin: 0 }}>Trade Visualizer</h2>
         <div style={{ display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap' }}>
+          
+          {/* NEW: Position Size Calculator Button */}
+          <button 
+            onClick={() => setIsCalcModalOpen(true)}
+            style={{ padding: '8px 12px', backgroundColor: '#2e7d32', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect><rect x="9" y="9" width="6" height="6"></rect><line x1="9" y1="1" x2="9" y2="4"></line><line x1="15" y1="1" x2="15" y2="4"></line><line x1="9" y1="20" x2="9" y2="23"></line><line x1="15" y1="20" x2="15" y2="23"></line><line x1="20" y1="9" x2="23" y2="9"></line><line x1="20" y1="14" x2="23" y2="14"></line><line x1="1" y1="9" x2="4" y2="9"></line><line x1="1" y1="14" x2="4" y2="14"></line></svg>
+            Calculator
+          </button>
+          
+          <div style={{ borderLeft: '2px solid #ddd', height: '24px' }}></div>
+
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <div style={{ display: 'flex', alignItems: 'center' }}>
               <label style={{ fontSize: '12px', fontWeight: 'bold', color: '#555', marginRight: '6px', textTransform: 'uppercase' }}>Start:</label>
@@ -547,6 +615,112 @@ export default function App() {
           <button onClick={() => setIsAuthenticated(false)} style={{ padding: '6px 12px', backgroundColor: '#f44336', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>Lock</button>
         </div>
       </div>
+
+      {/* NEW: POSITION SIZE CALCULATOR MODAL OVERLAY */}
+      {isCalcModalOpen && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ backgroundColor: '#fff', padding: '25px', borderRadius: '8px', width: '420px', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }}>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '2px solid #eee', paddingBottom: '10px' }}>
+              <h3 style={{ margin: 0, color: '#333' }}>Position Size Calculator</h3>
+              <button onClick={() => setIsCalcModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#888' }}>&times;</button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+              
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#555' }}>Ticker:</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  {isFetchingPrice && <span style={{ fontSize: '11px', color: '#1565c0' }}>Fetching...</span>}
+                  <input 
+                    type="text" 
+                    value={calcTicker} 
+                    onChange={(e) => setCalcTicker(e.target.value.toUpperCase())} 
+                    onBlur={handleCalcTickerBlur}
+                    placeholder="e.g. AAPL"
+                    style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', width: '120px', outline: 'none', textTransform: 'uppercase' }} 
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#555' }}>Total Position Size ($):</label>
+                <input 
+                  type="number" 
+                  value={calcTotalCapital} 
+                  onChange={(e) => setCalcTotalCapital(e.target.value)} 
+                  placeholder="e.g. 10000"
+                  style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', width: '120px', outline: 'none' }} 
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#555' }}>Position Allocation (%):</label>
+                <input 
+                  type="number" 
+                  value={calcPositionPct} 
+                  onChange={(e) => setCalcPositionPct(e.target.value)} 
+                  placeholder="e.g. 10"
+                  style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', width: '120px', outline: 'none' }} 
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#555' }}>Stock Entry Price ($):</label>
+                <input 
+                  type="number" 
+                  value={calcEntryPrice} 
+                  onChange={(e) => setCalcEntryPrice(e.target.value)} 
+                  placeholder="0.00"
+                  style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', width: '120px', outline: 'none' }} 
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#555' }}>Stop Loss Price ($):</label>
+                <input 
+                  type="number" 
+                  value={calcStopLoss} 
+                  onChange={(e) => setCalcStopLoss(e.target.value)} 
+                  placeholder="0.00"
+                  style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', width: '120px', outline: 'none' }} 
+                />
+              </div>
+
+            </div>
+
+            <div style={{ marginTop: '25px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '6px', border: '1px solid #ddd' }}>
+              <h4 style={{ margin: '0 0 15px 0', color: '#333', textAlign: 'center' }}>Trade Execution Plan</h4>
+              
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+                <span style={{ fontSize: '13px', color: '#555' }}>Shares to Buy:</span>
+                <span style={{ fontSize: '16px', fontWeight: 'bold', color: '#1565c0' }}>{calcShares}</span>
+              </div>
+              
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+                <span style={{ fontSize: '13px', color: '#555' }}>Capital Allocated:</span>
+                <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#333' }}>${calcCapitalAllocated.toFixed(2)}</span>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+                <span style={{ fontSize: '13px', color: '#555' }}>Total Open Risk ($):</span>
+                <span style={{ fontSize: '14px', fontWeight: 'bold', color: calcOpenRiskDollar > 0 ? '#d32f2f' : '#888' }}>
+                  {calcOpenRiskDollar > 0 ? `$${calcOpenRiskDollar.toFixed(2)}` : '--'}
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '13px', color: '#555' }}>Risk to Portfolio (%):</span>
+                <span style={{ fontSize: '14px', fontWeight: 'bold', color: calcOpenRiskPct > 0 ? '#d32f2f' : '#888' }}>
+                  {calcOpenRiskPct > 0 ? `${calcOpenRiskPct.toFixed(2)}%` : '--'}
+                </span>
+              </div>
+
+            </div>
+
+          </div>
+        </div>
+      )}
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         
@@ -842,7 +1016,7 @@ export default function App() {
                         <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#333' }}>{openHeat !== null ? `$${openHeat.toFixed(2)}` : 'Set Stop Price'}</div>
                       </div>
                     </div>
-                    {/* NEW: Trade Notes Field */}
+                    {/* Trade Notes Field */}
                     <div style={{ marginTop: '15px' }}>
                       <div style={{ fontSize: '11px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold', marginBottom: '5px' }}>Trade Notes</div>
                       <textarea 
@@ -882,7 +1056,7 @@ export default function App() {
                         <div style={{ fontSize: '18px', fontWeight: 'bold', color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f' }}>{stat.totalClosedCost > 0 ? (stat.realizedPL >= 0 ? '+' : '') + ((stat.realizedPL / stat.totalClosedCost) * 100).toFixed(2) + '%' : '0.00%'}</div>
                       </div>
                     </div>
-                    {/* NEW: Trade Notes Field */}
+                    {/* Trade Notes Field */}
                     <div style={{ marginTop: '15px' }}>
                       <div style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold', marginBottom: '5px' }}>Trade Notes</div>
                       <textarea 

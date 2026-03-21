@@ -19,9 +19,6 @@ const CYCLE_COLORS = [
 ];
 
 export default function App() {
-  // ==========================================
-  // NEW: AUTHENTICATION STATE
-  // ==========================================
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
   const [authError, setAuthError] = useState(false);
@@ -49,9 +46,6 @@ export default function App() {
   const seriesRef = useRef(null);
   const markersRef = useRef(null); 
 
-  // ==========================================
-  // NEW: LOGIN HANDLER
-  // ==========================================
   const handleLogin = (e) => {
     e.preventDefault();
     if (passwordInput === import.meta.env.VITE_APP_PASSWORD) {
@@ -113,7 +107,6 @@ export default function App() {
     }
   };
 
-  // Only fetch data from DB if the user is authenticated
   useEffect(() => {
     if (isAuthenticated) {
       fetchTradesFromDB();
@@ -352,7 +345,6 @@ export default function App() {
   }, [trades]);
 
   useEffect(() => {
-    // Only initialize the chart if the user is authenticated and the container exists
     if (isAuthenticated && chartContainerRef.current) {
       const chart = createChart(chartContainerRef.current, {
         width: chartContainerRef.current.clientWidth,
@@ -465,10 +457,6 @@ export default function App() {
 
   const uniqueTickers = [...new Set(trades.map(t => t.ticker))].sort();
 
-
-  // ==========================================
-  // NEW: CONDITIONAL RENDER FOR LOGIN SCREEN
-  // ==========================================
   if (!isAuthenticated) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', backgroundColor: '#f5f5f5', fontFamily: 'sans-serif' }}>
@@ -495,9 +483,6 @@ export default function App() {
     );
   }
 
-  // ==========================================
-  // EXISTING DASHBOARD RENDER
-  // ==========================================
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', fontFamily: 'sans-serif' }}>
       
@@ -532,7 +517,15 @@ export default function App() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #ddd', paddingBottom: '8px', marginBottom: '10px' }}>
                 <h3 style={{ margin: 0 }}>Portfolio Summary</h3>
                 {uniqueTickers.length > 0 && (
-                  <select value={portfolioFilter} onChange={(e) => setPortfolioFilter(e.target.value)} style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #ccc', fontSize: '13px', outline: 'none' }}>
+                  <select 
+                    value={portfolioFilter} 
+                    // UPDATED: Sync both filters here
+                    onChange={(e) => {
+                      setPortfolioFilter(e.target.value);
+                      setHistoryFilter(e.target.value);
+                    }} 
+                    style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #ccc', fontSize: '13px', outline: 'none' }}
+                  >
                     <option value="All">All Tickers</option>
                     {uniqueTickers.map(ticker => (<option key={ticker} value={ticker}>{ticker}</option>))}
                   </select>
@@ -632,7 +625,15 @@ export default function App() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', borderBottom: '2px solid #ddd', paddingBottom: '8px' }}>
             <h3 style={{ margin: '0' }}>Trade History</h3>
             {uniqueTickers.length > 0 && (
-              <select value={historyFilter} onChange={(e) => setHistoryFilter(e.target.value)} style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #ccc', fontSize: '13px', outline: 'none' }}>
+              <select 
+                value={historyFilter} 
+                // UPDATED: Sync both filters here as well
+                onChange={(e) => {
+                  setHistoryFilter(e.target.value);
+                  setPortfolioFilter(e.target.value);
+                }} 
+                style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #ccc', fontSize: '13px', outline: 'none' }}
+              >
                 <option value="All">All Tickers</option>
                 {uniqueTickers.map(ticker => (<option key={ticker} value={ticker}>{ticker}</option>))}
               </select>

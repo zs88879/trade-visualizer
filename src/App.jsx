@@ -279,21 +279,29 @@ export default function App() {
     fetchCurrentPrices();
   }, [trades]);
 
+// 1. CHART INITIALIZATION
   useEffect(() => {
-    if (isAuthenticated && chartContainerRef.current) {
+    // ONLY initialize the chart if the tab is active and visible
+    if (isAuthenticated && chartContainerRef.current && activeTab === 'chart') {
       const chart = createChart(chartContainerRef.current, {
-        width: chartContainerRef.current.clientWidth, height: 500,
+        width: chartContainerRef.current.clientWidth || 800, 
+        height: 500,
         layout: { background: { color: '#ffffff' }, textColor: '#333', fontSize: 10 },
         grid: { vertLines: { color: '#eee' }, horzLines: { color: '#eee' } },
       });
-      const candlestickSeries = chart.addSeries(CandlestickSeries, { upColor: '#26a69a', downColor: '#ef5350', borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350' });
+      const candlestickSeries = chart.addSeries(CandlestickSeries, { 
+        upColor: '#26a69a', downColor: '#ef5350', borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350' 
+      });
       chartRef.current = chart; seriesRef.current = candlestickSeries;
       return () => { chart.remove(); markersRef.current = null; };
     }
-  }, [isAuthenticated, activeTab]); // Added activeTab so it redraws correctly when switching tabs
+  }, [isAuthenticated, activeTab]);
 
+  // 2. DATA FETCHING & POPULATION
   useEffect(() => {
-    if (!selectedTicker || !seriesRef.current) return;
+    // Add activeTab check here so it doesn't try to draw on a hidden canvas
+    if (!selectedTicker || !seriesRef.current || activeTab !== 'chart') return;
+    
     const fetchMarketData = async () => {
       const tickerTrades = analyzedTrades.filter((t) => t.ticker === selectedTicker);
       if (tickerTrades.length === 0) return;
@@ -321,8 +329,9 @@ export default function App() {
       } catch (error) {}
     };
     fetchMarketData();
-  }, [selectedTicker, analyzedTrades]);
-
+  // We added activeTab to this dependency array so it refetches when you switch back to the chart tab!
+  }, [selectedTicker, analyzedTrades, activeTab]);
+  
   const handleCalcTickerBlur = async () => {
     if (!calcTicker) return; setIsFetchingPrice(true); setCalcHighOfDay(null); setCalcLowOfDay(null);
     try {

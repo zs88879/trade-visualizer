@@ -40,7 +40,9 @@ export default function App() {
   const [riskPrices, setRiskPrices] = useState({});
   const [tradeNotes, setTradeNotes] = useState({});
 
-  // Advanced Analytics State
+  // NEW: Account Equity State (persisted to localStorage)
+  const [accountEquity, setAccountEquity] = useState(() => localStorage.getItem('trade_journal_equity') || '');
+
   const [advancedStats, setAdvancedStats] = useState({
     maxDD: 0, maxWinStreak: 0, maxLossStreak: 0, avgWinDays: 0, avgLossDays: 0
   });
@@ -64,14 +66,15 @@ export default function App() {
   const [calcHighOfDay, setCalcHighOfDay] = useState(null); 
   const [calcLowOfDay, setCalcLowOfDay] = useState(null); 
 
+  // Save equity to local storage whenever it changes
+  useEffect(() => { localStorage.setItem('trade_journal_equity', accountEquity); }, [accountEquity]);
+
   const handleLogin = (e) => {
     e.preventDefault();
     if (passwordInput === import.meta.env.VITE_APP_PASSWORD) {
-      setIsAuthenticated(true);
-      setAuthError(false);
+      setIsAuthenticated(true); setAuthError(false);
     } else {
-      setAuthError(true);
-      setPasswordInput('');
+      setAuthError(true); setPasswordInput('');
     }
   };
 
@@ -104,19 +107,13 @@ export default function App() {
       let query = supabase.from('trades').select('*');
       if (startDate) query = query.gte('trade_date', startDate);
       if (endDate) query = query.lte('trade_date', endDate);
-
       const { data, error } = await query;
       if (error) throw error;
 
       const formattedTrades = data.map(row => ({
-        formattedDate: row.trade_date,
-        ticker: row.ticker,
-        'buy/sell': row.action,
-        price: Number(row.price),
-        quantity: Number(row.quantity)
+        formattedDate: row.trade_date, ticker: row.ticker, 'buy/sell': row.action, price: Number(row.price), quantity: Number(row.quantity)
       })).sort((a, b) => {
-        const dateA = new Date(a.formattedDate);
-        const dateB = new Date(b.formattedDate);
+        const dateA = new Date(a.formattedDate); const dateB = new Date(b.formattedDate);
         if (dateA.getTime() === dateB.getTime()) {
           if (a['buy/sell'] === 'buy' && b['buy/sell'] === 'sell') return -1;
           if (a['buy/sell'] === 'sell' && b['buy/sell'] === 'buy') return 1;
@@ -124,37 +121,24 @@ export default function App() {
         }
         return dateA - dateB;
       });
-
       setTrades(formattedTrades);
     } catch (error) { console.error("Error fetching from DB:", error.message); }
   };
 
-  useEffect(() => {
-    if (isAuthenticated) {
-      fetchTradesFromDB();
-      fetchStopsFromDB();
-      fetchNotesFromDB(); 
-    }
-  }, [startDate, endDate, isAuthenticated]);
+  useEffect(() => { if (isAuthenticated) { fetchTradesFromDB(); fetchStopsFromDB(); fetchNotesFromDB(); } }, [startDate, endDate, isAuthenticated]);
 
   const syncStopPrice = async (posId, price) => {
     const val = parseFloat(price);
     try {
-      if (!isNaN(val)) {
-        await supabase.from('active_stops').upsert({ position_id: posId, stop_price: val });
-      } else {
-        await supabase.from('active_stops').delete().eq('position_id', posId);
-      }
+      if (!isNaN(val)) await supabase.from('active_stops').upsert({ position_id: posId, stop_price: val });
+      else await supabase.from('active_stops').delete().eq('position_id', posId);
     } catch (error) { console.error("Network or code error:", error.message); }
   };
 
   const syncTradeNote = async (posId, note) => {
     try {
-      if (!note || note.trim() === '') {
-        await supabase.from('trade_notes').delete().eq('position_id', posId);
-      } else {
-        await supabase.from('trade_notes').upsert({ position_id: posId, note: note });
-      }
+      if (!note || note.trim() === '') await supabase.from('trade_notes').delete().eq('position_id', posId);
+      else await supabase.from('trade_notes').upsert({ position_id: posId, note: note });
     } catch (error) { console.error("Network or code error:", error.message); }
   };
 
@@ -167,16 +151,13 @@ export default function App() {
           const dbTrades = results.data.map((trade) => {
             const dateStr = trade.date;
             const formattedDate = `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}`;
-            return {
-              trade_date: formattedDate, ticker: trade.ticker, action: trade['buy/sell'], price: parseFloat(trade.price), quantity: parseInt(trade.quantity, 10)
-            };
+            return { trade_date: formattedDate, ticker: trade.ticker, action: trade['buy/sell'], price: parseFloat(trade.price), quantity: parseInt(trade.quantity, 10) };
           });
           try {
             const uniqueDates = [...new Set(dbTrades.map(trade => trade.trade_date))];
             await supabase.from('trades').delete().in('trade_date', uniqueDates);
             await supabase.from('trades').insert(dbTrades);
-            alert("Trades successfully synced!");
-            fetchTradesFromDB(); 
+            alert("Trades successfully synced!"); fetchTradesFromDB(); 
           } catch (error) { alert("Failed to sync database."); }
             event.target.value = null; 
         }
@@ -185,41 +166,21 @@ export default function App() {
   };
 
   const handleExportCSV = () => {
-    if (Object.keys(tickerStats).length === 0) {
-      alert("No data available to export.");
-      return;
-    }
-
-    const exportData = Object.values(tickerStats)
-      .sort((a, b) => a.ticker.localeCompare(b.ticker) || a.positionNum - b.positionNum)
-      .map(stat => {
+    if (Object.keys(tickerStats).length === 0) { alert("No data available to export."); return; }
+    const exportData = Object.values(tickerStats).sort((a, b) => a.ticker.localeCompare(b.ticker) || a.positionNum - b.positionNum).map(stat => {
         const isClosed = stat.qty === 0;
         return {
-          "Ticker": stat.ticker,
-          "Cycle #": stat.positionNum,
-          "Status": isClosed ? "CLOSED" : "OPEN",
-          "Remaining Qty": stat.qty,
-          "Avg Entry Price": stat.avgCost.toFixed(2),
-          "Net Realized P/L ($)": stat.realizedPL.toFixed(2),
-          "Open P/L ($)": stat.qty > 0 ? stat.openPL.toFixed(2) : "0.00",
-          "Gross Profit ($)": stat.grossProfit.toFixed(2),
-          "Gross Loss ($)": stat.grossLoss.toFixed(2),
-          "Win %": stat.tradesClosed > 0 ? ((stat.winningTrades / stat.tradesClosed) * 100).toFixed(0) + '%' : "N/A",
-          "Total Trades in Cycle": stat.tradesClosed,
-          "Stop Price": riskPrices[stat.id] || "None",
-          "Trade Journal Notes": tradeNotes[stat.id] || ""
+          "Ticker": stat.ticker, "Cycle #": stat.positionNum, "Status": isClosed ? "CLOSED" : "OPEN", "Remaining Qty": stat.qty,
+          "Avg Entry Price": stat.avgCost.toFixed(2), "Net Realized P/L ($)": stat.realizedPL.toFixed(2), "Open P/L ($)": stat.qty > 0 ? stat.openPL.toFixed(2) : "0.00",
+          "Gross Profit ($)": stat.grossProfit.toFixed(2), "Gross Loss ($)": stat.grossLoss.toFixed(2), "Win %": stat.tradesClosed > 0 ? ((stat.winningTrades / stat.tradesClosed) * 100).toFixed(0) + '%' : "N/A",
+          "Total Trades in Cycle": stat.tradesClosed, "Stop Price": riskPrices[stat.id] || "None", "Trade Journal Notes": tradeNotes[stat.id] || ""
         };
     });
-
     const csv = Papa.unparse(exportData);
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.setAttribute("download", `trade_journal_export_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const link = document.createElement("a"); link.href = url; link.setAttribute("download", `trade_journal_export_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
   useEffect(() => {
@@ -229,11 +190,7 @@ export default function App() {
       return;
     }
 
-    const stats = {};
-    const mStats = {}; 
-    const positionCounters = {}; 
-    const enrichedTradesList = [];
-    let realizedEvents = []; 
+    const stats = {}; const mStats = {}; const positionCounters = {}; const enrichedTradesList = []; let realizedEvents = []; 
     
     trades.forEach(trade => {
       if (positionCounters[trade.ticker] === undefined) positionCounters[trade.ticker] = 1;
@@ -244,147 +201,81 @@ export default function App() {
 
       if (!stats[posId]) {
         stats[posId] = { 
-          id: posId, ticker: trade.ticker, positionNum: currentPosNum,
-          qty: 0, totalCost: 0, realizedPL: 0, avgCost: 0, currentPrice: 0, openPL: 0,
+          id: posId, ticker: trade.ticker, positionNum: currentPosNum, qty: 0, totalCost: 0, realizedPL: 0, avgCost: 0, currentPrice: 0, openPL: 0,
           openLots: [], totalDaysHeld: 0, sharesClosed: 0, tradesClosed: 0, winningTrades: 0, losingTrades: 0, grossProfit: 0, grossLoss: 0, totalClosedCost: 0,
           winDays: 0, winShares: 0, lossDays: 0, lossShares: 0
         };
       }
       
-      const s = stats[posId];
-      const tradeDate = new Date(trade.formattedDate);
+      const s = stats[posId]; const tradeDate = new Date(trade.formattedDate);
       
       if (trade['buy/sell'] === 'buy') {
-        s.qty += trade.quantity;
-        s.totalCost += (trade.price * trade.quantity);
-        s.avgCost = s.qty > 0 ? s.totalCost / s.qty : 0;
+        s.qty += trade.quantity; s.totalCost += (trade.price * trade.quantity); s.avgCost = s.qty > 0 ? s.totalCost / s.qty : 0;
         s.openLots.push({ date: tradeDate, qty: trade.quantity });
-        
       } else if (trade['buy/sell'] === 'sell') {
-        const closedCost = s.avgCost * trade.quantity;
-        const pl = trade.quantity * (trade.price - s.avgCost);
-        
-        s.realizedPL += pl;
-        s.totalClosedCost += closedCost; 
-        s.qty -= trade.quantity;
-        s.totalCost -= closedCost;
+        const closedCost = s.avgCost * trade.quantity; const pl = trade.quantity * (trade.price - s.avgCost);
+        s.realizedPL += pl; s.totalClosedCost += closedCost; s.qty -= trade.quantity; s.totalCost -= closedCost;
         if (s.qty === 0) { s.avgCost = 0; s.totalCost = 0; }
-
         s.tradesClosed++;
-        if (pl > 0) { s.grossProfit += pl; s.winningTrades++; }
-        else if (pl < 0) { s.grossLoss += Math.abs(pl); s.losingTrades++; }
+        if (pl > 0) { s.grossProfit += pl; s.winningTrades++; } else if (pl < 0) { s.grossLoss += Math.abs(pl); s.losingTrades++; }
 
         realizedEvents.push({ date: tradeDate, pl: pl }); 
 
-        const yyyy = tradeDate.getFullYear();
-        const mm = String(tradeDate.getMonth() + 1).padStart(2, '0');
-        const monthKey = `${yyyy}-${mm}`; 
-
-        if (!mStats[monthKey]) {
-          mStats[monthKey] = { monthKey, realizedPL: 0, grossProfit: 0, grossLoss: 0, tradesClosed: 0, winningTrades: 0, losingTrades: 0 };
-        }
-
-        mStats[monthKey].realizedPL += pl;
-        mStats[monthKey].tradesClosed++;
+        const yyyy = tradeDate.getFullYear(); const mm = String(tradeDate.getMonth() + 1).padStart(2, '0'); const monthKey = `${yyyy}-${mm}`; 
+        if (!mStats[monthKey]) mStats[monthKey] = { monthKey, realizedPL: 0, grossProfit: 0, grossLoss: 0, tradesClosed: 0, winningTrades: 0, losingTrades: 0 };
+        mStats[monthKey].realizedPL += pl; mStats[monthKey].tradesClosed++;
         if (pl > 0) { mStats[monthKey].grossProfit += pl; mStats[monthKey].winningTrades++; } 
         else if (pl < 0) { mStats[monthKey].grossLoss += Math.abs(pl); mStats[monthKey].losingTrades++; }
 
         let qtyToClose = trade.quantity;
         while (qtyToClose > 0 && s.openLots.length > 0) {
-          let lot = s.openLots[0];
-          let closeQty = Math.min(qtyToClose, lot.qty);
-          let daysHeld = (tradeDate - lot.date) / (1000 * 60 * 60 * 24);
-          
-          s.totalDaysHeld += (daysHeld * closeQty);
-          s.sharesClosed += closeQty;
-
-          if (pl > 0) {
-            s.winDays += (daysHeld * closeQty);
-            s.winShares += closeQty;
-          } else if (pl < 0) {
-            s.lossDays += (daysHeld * closeQty);
-            s.lossShares += closeQty;
-          }
-
-          lot.qty -= closeQty;
-          qtyToClose -= closeQty;
-          if (lot.qty === 0) s.openLots.shift();
+          let lot = s.openLots[0]; let closeQty = Math.min(qtyToClose, lot.qty); let daysHeld = (tradeDate - lot.date) / (1000 * 60 * 60 * 24);
+          s.totalDaysHeld += (daysHeld * closeQty); s.sharesClosed += closeQty;
+          if (pl > 0) { s.winDays += (daysHeld * closeQty); s.winShares += closeQty; } else if (pl < 0) { s.lossDays += (daysHeld * closeQty); s.lossShares += closeQty; }
+          lot.qty -= closeQty; qtyToClose -= closeQty; if (lot.qty === 0) s.openLots.shift();
         }
-
         if (s.qty === 0) positionCounters[trade.ticker]++;
       }
     });
 
-    setMonthlyStats(mStats); 
-    setAnalyzedTrades(enrichedTradesList);
+    setMonthlyStats(mStats); setAnalyzedTrades(enrichedTradesList);
 
     realizedEvents.sort((a, b) => a.date - b.date);
-    
-    let peak = 0; let maxDD = 0; let cumulative = 0;
-    let curWin = 0, maxWinStreak = 0;
-    let curLoss = 0, maxLossStreak = 0;
-
+    let peak = 0; let maxDD = 0; let cumulative = 0; let curWin = 0, maxWinStreak = 0; let curLoss = 0, maxLossStreak = 0;
     realizedEvents.forEach(e => {
-      cumulative += e.pl;
-      if (cumulative > peak) peak = cumulative;
-      let drawdown = peak - cumulative;
-      if (drawdown > maxDD) maxDD = drawdown;
-
-      if (e.pl > 0) {
-        curWin++; maxWinStreak = Math.max(maxWinStreak, curWin);
-        curLoss = 0;
-      } else if (e.pl < 0) {
-        curLoss++; maxLossStreak = Math.max(maxLossStreak, curLoss);
-        curWin = 0;
-      }
+      cumulative += e.pl; if (cumulative > peak) peak = cumulative;
+      let drawdown = peak - cumulative; if (drawdown > maxDD) maxDD = drawdown;
+      if (e.pl > 0) { curWin++; maxWinStreak = Math.max(maxWinStreak, curWin); curLoss = 0; } 
+      else if (e.pl < 0) { curLoss++; maxLossStreak = Math.max(maxLossStreak, curLoss); curWin = 0; }
     });
 
-    let totalWinDays = 0, totalWinShares = 0;
-    let totalLossDays = 0, totalLossShares = 0;
-    Object.values(stats).forEach(s => {
-      totalWinDays += s.winDays; totalWinShares += s.winShares;
-      totalLossDays += s.lossDays; totalLossShares += s.lossShares;
-    });
-    
+    let totalWinDays = 0, totalWinShares = 0; let totalLossDays = 0, totalLossShares = 0;
+    Object.values(stats).forEach(s => { totalWinDays += s.winDays; totalWinShares += s.winShares; totalLossDays += s.lossDays; totalLossShares += s.lossShares; });
     const avgWinDays = totalWinShares > 0 ? (totalWinDays / totalWinShares).toFixed(1) : 0;
     const avgLossDays = totalLossShares > 0 ? (totalLossDays / totalLossShares).toFixed(1) : 0;
-
     setAdvancedStats({ maxDD, maxWinStreak, maxLossStreak, avgWinDays, avgLossDays });
 
     const fetchCurrentPrices = async () => {
       try {
         const openPositions = Object.values(stats).filter(stat => stat.qty > 0);
         const uniqueOpenTickers = [...new Set(openPositions.map(s => s.ticker))];
-        
         for (let i = 0; i < uniqueOpenTickers.length; i++) {
           const ticker = uniqueOpenTickers[i];
-          const fetchUrl = import.meta.env.PROD 
-            ? `/api/yahoo/${ticker}?interval=1d&range=5d`
-            : `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`)}`;
-          
+          const fetchUrl = import.meta.env.PROD ? `/api/yahoo/${ticker}?interval=1d&range=5d` : `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`)}`;
           try {
-            const res = await fetch(fetchUrl);
-            const data = await res.json();
+            const res = await fetch(fetchUrl); const data = await res.json();
             if (data.chart && data.chart.result && data.chart.result.length > 0) {
-              const quote = data.chart.result[0].indicators.quote[0];
-              const closes = quote.close.filter(c => c !== null && c !== undefined);
+              const quote = data.chart.result[0].indicators.quote[0]; const closes = quote.close.filter(c => c !== null && c !== undefined);
               if (closes.length > 0) {
                 const latestClosePrice = closes[closes.length - 1];
-                openPositions.forEach(stat => {
-                  if (stat.ticker === ticker) {
-                    stat.currentPrice = latestClosePrice;
-                    stat.openPL = (latestClosePrice - stat.avgCost) * stat.qty;
-                  }
-                });
+                openPositions.forEach(stat => { if (stat.ticker === ticker) { stat.currentPrice = latestClosePrice; stat.openPL = (latestClosePrice - stat.avgCost) * stat.qty; } });
               }
             }
           } catch (error) {}
-          setTickerStats({...stats});
-          await new Promise(r => setTimeout(r, 200));
+          setTickerStats({...stats}); await new Promise(r => setTimeout(r, 200));
         }
       } catch (error) {}
     };
-
     fetchCurrentPrices();
   }, [trades]);
 
@@ -395,13 +286,11 @@ export default function App() {
         layout: { background: { color: '#ffffff' }, textColor: '#333', fontSize: 10 },
         grid: { vertLines: { color: '#eee' }, horzLines: { color: '#eee' } },
       });
-      const candlestickSeries = chart.addSeries(CandlestickSeries, { 
-        upColor: '#26a69a', downColor: '#ef5350', borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350' 
-      });
+      const candlestickSeries = chart.addSeries(CandlestickSeries, { upColor: '#26a69a', downColor: '#ef5350', borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350' });
       chartRef.current = chart; seriesRef.current = candlestickSeries;
       return () => { chart.remove(); markersRef.current = null; };
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, activeTab]); // Added activeTab so it redraws correctly when switching tabs
 
   useEffect(() => {
     if (!selectedTicker || !seriesRef.current) return;
@@ -409,77 +298,48 @@ export default function App() {
       const tickerTrades = analyzedTrades.filter((t) => t.ticker === selectedTicker);
       if (tickerTrades.length === 0) return;
       try {
-        const fetchUrl = import.meta.env.PROD 
-            ? `/api/yahoo/${selectedTicker}?interval=1d&range=1y`
-            : `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${selectedTicker}?interval=1d&range=1y`)}`;
-
-        const response = await fetch(fetchUrl);
-        const data = await response.json();
-
+        const fetchUrl = import.meta.env.PROD ? `/api/yahoo/${selectedTicker}?interval=1d&range=1y` : `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${selectedTicker}?interval=1d&range=1y`)}`;
+        const response = await fetch(fetchUrl); const data = await response.json();
         if (data.chart && data.chart.result && data.chart.result.length > 0) {
-          const result = data.chart.result[0];
-          const timestamps = result.timestamp;
-          const quote = result.indicators.quote[0];
+          const result = data.chart.result[0]; const timestamps = result.timestamp; const quote = result.indicators.quote[0];
           const opens = quote.open, highs = quote.high, lows = quote.low, closes = quote.close;
-
-          const realHistoricalData = [];
-          const seenDates = new Set();
-          
+          const realHistoricalData = []; const seenDates = new Set();
           for (let i = 0; i < timestamps.length; i++) {
             if (closes[i] !== null && closes[i] !== undefined) {
-              const date = new Date(timestamps[i] * 1000);
-              const formattedDate = date.toISOString().split('T')[0];
-              if (!seenDates.has(formattedDate)) {
-                seenDates.add(formattedDate);
-                realHistoricalData.push({ time: formattedDate, open: opens[i], high: highs[i], low: lows[i], close: closes[i] });
-              }
+              const date = new Date(timestamps[i] * 1000); const formattedDate = date.toISOString().split('T')[0];
+              if (!seenDates.has(formattedDate)) { seenDates.add(formattedDate); realHistoricalData.push({ time: formattedDate, open: opens[i], high: highs[i], low: lows[i], close: closes[i] }); }
             }
           }
-          realHistoricalData.sort((a, b) => new Date(a.time) - new Date(b.time));
-          seriesRef.current.setData(realHistoricalData);
+          realHistoricalData.sort((a, b) => new Date(a.time) - new Date(b.time)); seriesRef.current.setData(realHistoricalData);
         }
-
         const markers = tickerTrades.map((trade) => {
-          const colorIdx = (trade.positionNum - 1) % CYCLE_COLORS.length;
-          const markerColor = CYCLE_COLORS[colorIdx].border;
-          return {
-            time: trade.formattedDate, position: trade['buy/sell'] === 'buy' ? 'belowBar' : 'aboveBar',
-            color: markerColor, shape: trade['buy/sell'] === 'buy' ? 'arrowUp' : 'arrowDown',
-            text: `${trade['buy/sell'] === 'buy' ? 'B' : 'S'} #${trade.positionNum}: ${trade.quantity}`
-          };
+          const colorIdx = (trade.positionNum - 1) % CYCLE_COLORS.length; const markerColor = CYCLE_COLORS[colorIdx].border;
+          return { time: trade.formattedDate, position: trade['buy/sell'] === 'buy' ? 'belowBar' : 'aboveBar', color: markerColor, shape: trade['buy/sell'] === 'buy' ? 'arrowUp' : 'arrowDown', text: `${trade['buy/sell'] === 'buy' ? 'B' : 'S'} #${trade.positionNum}: ${trade.quantity}` };
         });
-        
         markers.sort((a, b) => new Date(a.time) - new Date(b.time));
-        if (!markersRef.current) markersRef.current = createSeriesMarkers(seriesRef.current, markers);
-        else markersRef.current.setMarkers(markers);
+        if (!markersRef.current) markersRef.current = createSeriesMarkers(seriesRef.current, markers); else markersRef.current.setMarkers(markers);
       } catch (error) {}
     };
     fetchMarketData();
   }, [selectedTicker, analyzedTrades]);
 
   const handleCalcTickerBlur = async () => {
-    if (!calcTicker) return;
-    setIsFetchingPrice(true); setCalcHighOfDay(null); setCalcLowOfDay(null);
+    if (!calcTicker) return; setIsFetchingPrice(true); setCalcHighOfDay(null); setCalcLowOfDay(null);
     try {
       const ticker = calcTicker.toUpperCase();
-      const fetchUrl = import.meta.env.PROD 
-        ? `/api/yahoo/${ticker}?interval=1d&range=5d`
-        : `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`)}`;
-      
+      const fetchUrl = import.meta.env.PROD ? `/api/yahoo/${ticker}?interval=1d&range=5d` : `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`)}`;
       const res = await fetch(fetchUrl); const data = await res.json();
       if (data.chart && data.chart.result && data.chart.result.length > 0) {
         const quote = data.chart.result[0].indicators.quote[0];
-        const closes = quote.close.filter(c => c !== null && c !== undefined);
-        const highs = quote.high.filter(h => h !== null && h !== undefined);
-        const lows = quote.low.filter(l => l !== null && l !== undefined);
-        
+        const closes = quote.close.filter(c => c !== null && c !== undefined); const highs = quote.high.filter(h => h !== null && h !== undefined); const lows = quote.low.filter(l => l !== null && l !== undefined);
         if (closes.length > 0) setCalcEntryPrice(closes[closes.length - 1].toFixed(2));
         if (highs.length > 0) setCalcHighOfDay(highs[highs.length - 1].toFixed(2));
         if (lows.length > 0) setCalcLowOfDay(lows[lows.length - 1].toFixed(2));
       }
-    } catch (error) {}
-    setIsFetchingPrice(false);
+    } catch (error) {} setIsFetchingPrice(false);
   };
+
+  const parsedEquity = parseFloat(accountEquity) || 0;
 
   const statsArray = Object.values(tickerStats);
   const winningPositions = statsArray.filter(stat => stat.realizedPL > 0);
@@ -496,6 +356,9 @@ export default function App() {
   const globalSharesClosed = statsArray.reduce((sum, stat) => sum + stat.sharesClosed, 0);
   const globalAvgDaysHeld = globalSharesClosed > 0 ? (globalTotalDaysHeld / globalSharesClosed).toFixed(1) : 0;
 
+  const totalInvested = statsArray.reduce((sum, stat) => sum + (stat.qty * stat.avgCost), 0);
+  const totalPosPct = parsedEquity > 0 ? ((totalInvested / parsedEquity) * 100).toFixed(2) : '--';
+
   const totalOpenHeat = statsArray.reduce((sum, stat) => {
     if (stat.qty > 0) {
       const stopPrice = parseFloat(riskPrices[stat.id]);
@@ -511,6 +374,8 @@ export default function App() {
     }
     return sum;
   }, 0);
+
+  const globalRiskPct = parsedEquity > 0 && totalOpenRisk > 0 ? ((totalOpenRisk / parsedEquity) * 100).toFixed(2) : '--';
 
   const uniqueTickers = [...new Set(trades.map(t => t.ticker))].sort();
 
@@ -580,6 +445,14 @@ export default function App() {
           <div style={{ borderLeft: '2px solid #ddd', height: '24px' }}></div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            {/* NEW: Account Equity Input */}
+            <div title="Your Total Portfolio Value (Cash + Invested). Automatically saves to your browser." style={{ display: 'flex', alignItems: 'center', backgroundColor: '#e3f2fd', padding: '4px 8px', borderRadius: '4px', border: '1px solid #90caf9' }}>
+              <label style={{ fontSize: '12px', fontWeight: 'bold', color: '#1565c0', marginRight: '6px', textTransform: 'uppercase' }}>Equity $:</label>
+              <input type="number" value={accountEquity} onChange={(e) => setAccountEquity(e.target.value)} style={{ padding: '4px', borderRadius: '4px', border: '1px solid #ccc', width: '100px', outline: 'none' }} placeholder="100000" />
+            </div>
+
+            <div style={{ borderLeft: '2px solid #ddd', height: '24px', margin: '0 5px' }}></div>
+
             <div style={{ display: 'flex', alignItems: 'center' }}>
               <label style={{ fontSize: '12px', fontWeight: 'bold', color: '#555', marginRight: '6px', textTransform: 'uppercase' }}>Start:</label>
               <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={{ padding: '6px', borderRadius: '4px', border: '1px solid #ccc' }} />
@@ -795,21 +668,30 @@ export default function App() {
                 <div style={{ fontSize: '12px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Win Rate</div>
                 <div style={{ fontSize: '24px', fontWeight: 'bold', color: winRate >= 50 ? '#2e7d32' : '#d32f2f' }}>{winRate}%</div>
               </div>
-              <div title="Average number of days positions were held before closing." style={{ flex: 1, minWidth: '120px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
-                <div style={{ fontSize: '12px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Avg Days Held</div>
-                <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#333' }}>{globalAvgDaysHeld}</div>
-              </div>
               <div title="Total realized profit minus total realized loss." style={{ flex: 1, minWidth: '140px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
                 <div style={{ fontSize: '12px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Net Realized P/L</div>
                 <div style={{ fontSize: '24px', fontWeight: 'bold', color: totalRealizedPL >= 0 ? '#2e7d32' : '#d32f2f' }}>{totalRealizedPL >= 0 ? '+' : '-'}${Math.abs(totalRealizedPL).toFixed(2)}</div>
               </div>
+
+              {/* NEW: Total Invested Portfolio % */}
+              <div title="Total capital currently deployed in open positions as a percentage of your Account Equity." style={{ flex: 1, minWidth: '140px', padding: '15px', backgroundColor: '#e8f5e9', borderRadius: '8px', border: '1px solid #c8e6c9', cursor: 'help' }}>
+                <div style={{ fontSize: '12px', color: '#2e7d32', textTransform: 'uppercase', fontWeight: 'bold' }}>Total Invested</div>
+                <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2e7d32' }}>
+                  ${totalInvested.toFixed(0)} <span style={{fontSize: '14px', fontWeight: 'normal'}}>({totalPosPct}%)</span>
+                </div>
+              </div>
+
               <div title="Amount of open equity at risk: (Current Price - Stop Price) × Open Shares." style={{ flex: 1, minWidth: '140px', padding: '15px', backgroundColor: '#e3f2fd', borderRadius: '8px', border: '1px solid #bbdefb', cursor: 'help' }}>
                 <div style={{ fontSize: '12px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Total Open Heat</div>
                 <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1565c0' }}>${totalOpenHeat.toFixed(2)}</div>
               </div>
-              <div title="Amount of initial capital at risk: (Avg Cost - Stop Price) × Open Shares." style={{ flex: 1, minWidth: '140px', padding: '15px', backgroundColor: '#fff3e0', borderRadius: '8px', border: '1px solid #ffe0b2', cursor: 'help' }}>
+
+              {/* UPDATED: Open Risk Portfolio % */}
+              <div title="Amount of initial capital at risk: (Avg Cost - Stop Price) × Open Shares. % is based on Account Equity." style={{ flex: 1, minWidth: '140px', padding: '15px', backgroundColor: '#fff3e0', borderRadius: '8px', border: '1px solid #ffe0b2', cursor: 'help' }}>
                 <div style={{ fontSize: '12px', color: '#e65100', textTransform: 'uppercase', fontWeight: 'bold' }}>Total Open Risk</div>
-                <div style={{ fontSize: '24px', fontWeight: 'bold', color: totalOpenRisk > 0 ? '#d32f2f' : '#2e7d32' }}>{totalOpenRisk >= 0 ? '' : '-'}${Math.abs(totalOpenRisk).toFixed(2)}</div>
+                <div style={{ fontSize: '24px', fontWeight: 'bold', color: totalOpenRisk > 0 ? '#d32f2f' : '#2e7d32' }}>
+                  {totalOpenRisk >= 0 ? '' : '-'}${Math.abs(totalOpenRisk).toFixed(2)} <span style={{fontSize: '14px', fontWeight: 'normal'}}>({globalRiskPct}%)</span>
+                </div>
               </div>
 
               {/* Row 2: Advanced Stats (WITH TOOLTIPS) */}
@@ -818,6 +700,10 @@ export default function App() {
               <div title="The largest peak-to-trough drop in your cumulative realized P/L." style={{ flex: 1, minWidth: '140px', padding: '15px', backgroundColor: '#ffebee', borderRadius: '8px', border: '1px solid #ffcdd2', cursor: 'help' }}>
                 <div style={{ fontSize: '12px', color: '#c62828', textTransform: 'uppercase', fontWeight: 'bold' }}>Max Drawdown</div>
                 <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#c62828' }}>-${Math.abs(advancedStats.maxDD).toFixed(2)}</div>
+              </div>
+              <div title="Average number of days positions were held before closing." style={{ flex: 1, minWidth: '120px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
+                <div style={{ fontSize: '12px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Avg Hold (Overall)</div>
+                <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#333' }}>{globalAvgDaysHeld} Days</div>
               </div>
               <div title="Average days held for trades that closed in profit." style={{ flex: 1, minWidth: '140px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
                 <div style={{ fontSize: '12px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Avg Hold (Wins)</div>
@@ -864,6 +750,9 @@ export default function App() {
                 const riskPct = !isNaN(stopPrice) && stat.avgCost > 0 ? (((stat.avgCost - stopPrice) / stat.avgCost) * 100).toFixed(2) : null;
                 const openHeat = !isNaN(stopPrice) && stat.currentPrice > 0 ? (stat.currentPrice - stopPrice) * stat.qty : null;
                 
+                // NEW: Calculate specific position size %
+                const indPosSizePct = parsedEquity > 0 ? (((stat.qty * stat.avgCost) / parsedEquity) * 100).toFixed(2) + '%' : '--';
+
                 return (
                   <div key={stat.id} style={{ marginTop: '20px', padding: '15px', backgroundColor: '#e3f2fd', borderRadius: '8px', border: '1px solid #90caf9' }}>
                     <h4 style={{ margin: '0 0 15px 0', color: '#1565c0' }}>{displayName} Live Position Analytics</h4>
@@ -873,8 +762,8 @@ export default function App() {
                         <div style={{ fontSize: '18px', fontWeight: 'bold', color: stat.openPL >= 0 ? '#2e7d32' : '#d32f2f' }}>{stat.openPL >= 0 ? '+' : '-'}${Math.abs(stat.openPL).toFixed(2)}</div>
                       </div>
                       <div style={{ flex: 1, minWidth: '120px', padding: '10px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #bbdefb' }}>
-                        <div style={{ fontSize: '11px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Closed P/L</div>
-                        <div style={{ fontSize: '18px', fontWeight: 'bold', color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f' }}>{stat.realizedPL >= 0 ? '+' : '-'}${Math.abs(stat.realizedPL).toFixed(2)}</div>
+                        <div style={{ fontSize: '11px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Pos Sizing (%)</div>
+                        <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#333' }}>{indPosSizePct}</div>
                       </div>
                       <div style={{ flex: 1, minWidth: '120px', padding: '10px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #bbdefb' }}>
                         <div style={{ fontSize: '11px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Current Days Held</div>
@@ -882,11 +771,11 @@ export default function App() {
                       </div>
                       <div style={{ flex: 1, minWidth: '120px', padding: '10px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #bbdefb' }}>
                         <div style={{ fontSize: '11px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Open Risk</div>
-                        <div style={{ fontSize: '18px', fontWeight: 'bold', color: openRisk === null ? '#888' : (openRisk > 0 ? '#d32f2f' : '#2e7d32') }}>{openRisk !== null ? `$${openRisk.toFixed(2)} (${riskPct}%)` : 'Set Stop Price'}</div>
+                        <div style={{ fontSize: '18px', fontWeight: 'bold', color: openRisk === null ? '#888' : (openRisk > 0 ? '#d32f2f' : '#2e7d32') }}>{openRisk !== null ? `$${openRisk.toFixed(2)} (${riskPct}%)` : 'Set Stop'}</div>
                       </div>
                       <div style={{ flex: 1, minWidth: '120px', padding: '10px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #bbdefb' }}>
                         <div style={{ fontSize: '11px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Open Heat</div>
-                        <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#333' }}>{openHeat !== null ? `$${openHeat.toFixed(2)}` : 'Set Stop Price'}</div>
+                        <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#333' }}>{openHeat !== null ? `$${openHeat.toFixed(2)}` : 'Set Stop'}</div>
                       </div>
                     </div>
                     <div style={{ marginTop: '15px' }}>
@@ -936,12 +825,14 @@ export default function App() {
           {/* TABLE TAB                 */}
           {/* ========================================= */}
           <div style={{ display: activeTab === 'table' ? 'block' : 'none', overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px', minWidth: '900px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px', minWidth: '950px' }}>
               <thead>
                 <tr style={{ backgroundColor: '#f8f9fa', borderBottom: '2px solid #ddd', borderTop: '1px solid #ddd' }}>
                   <th style={{ padding: '12px 10px', textAlign: 'left', color: '#555' }}>Position</th>
                   <th style={{ padding: '12px 10px', textAlign: 'center', color: '#555' }}>Status</th>
                   <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Qty</th>
+                  {/* NEW TABLE COLUMN */}
+                  <th title="Percentage of Account Equity allocated to this position." style={{ padding: '12px 10px', textAlign: 'right', color: '#555', cursor: 'help' }}>Pos %</th>
                   <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Realized P/L</th>
                   <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Open P/L</th>
                   <th style={{ padding: '12px 10px', textAlign: 'center', color: '#555' }}>Win % / PF</th>
@@ -974,12 +865,18 @@ export default function App() {
                     const stopPrice = parseFloat(riskPrices[stat.id]);
                     const openRisk = !isClosed && !isNaN(stopPrice) ? (stat.avgCost - stopPrice) * stat.qty : null;
                     const openHeat = !isClosed && !isNaN(stopPrice) && stat.currentPrice > 0 ? (stat.currentPrice - stopPrice) * stat.qty : null;
+                    
+                    // NEW: Table specific Pos %
+                    const tablePosSizePct = !isClosed && parsedEquity > 0 ? (((stat.qty * stat.avgCost) / parsedEquity) * 100).toFixed(2) + '%' : '--';
 
                     return (
                       <tr key={stat.id} style={{ borderBottom: '1px solid #eee', backgroundColor: index % 2 === 0 ? '#fff' : '#fafafa', transition: 'background-color 0.2s', cursor: 'pointer' }} onClick={() => { setSelectedTicker(stat.ticker); setActiveTab('chart'); setPortfolioFilter(stat.ticker); setHistoryFilter(stat.ticker); }} onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f1f8ff'} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = index % 2 === 0 ? '#fff' : '#fafafa'}>
                         <td style={{ padding: '12px 10px', fontWeight: 'bold' }}>{displayName}</td>
                         <td style={{ padding: '12px 10px', textAlign: 'center' }}><span style={{ padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 'bold', backgroundColor: isClosed ? '#e0e0e0' : '#bbdefb', color: isClosed ? '#666' : '#1565c0' }}>{isClosed ? 'CLOSED' : 'OPEN'}</span></td>
                         <td style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 'bold' }}>{stat.qty}</td>
+                        {/* NEW ROW DATA */}
+                        <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333' }}>{tablePosSizePct}</td>
+                        
                         <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{stat.realizedPL >= 0 ? '+' : ''}{stat.realizedPL === 0 ? '--' : '$' + stat.realizedPL.toFixed(2)}</td>
                         <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.openPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{isClosed ? '--' : (stat.openPL >= 0 ? '+' : '') + '$' + stat.openPL.toFixed(2)}</td>
                         <td style={{ padding: '12px 10px', textAlign: 'center', color: '#555' }}>{posWinRate} / {posPF}</td>

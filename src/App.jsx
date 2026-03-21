@@ -38,6 +38,9 @@ export default function App() {
   const [historyFilter, setHistoryFilter] = useState('All');
   const [portfolioFilter, setPortfolioFilter] = useState('All');
   const [riskPrices, setRiskPrices] = useState({});
+  
+  // NEW: State to hold notes for each trade cycle
+  const [tradeNotes, setTradeNotes] = useState({});
 
   const [activeTab, setActiveTab] = useState('chart');
 
@@ -71,6 +74,24 @@ export default function App() {
       }
     } catch (error) {
       console.error("Error fetching stops from DB:", error.message);
+    }
+  };
+
+  // NEW: Fetch notes from database
+  const fetchNotesFromDB = async () => {
+    try {
+      const { data, error } = await supabase.from('trade_notes').select('*');
+      if (error) throw error;
+      
+      if (data) {
+        const notesObj = {};
+        data.forEach(row => {
+          notesObj[row.position_id] = row.note;
+        });
+        setTradeNotes(notesObj);
+      }
+    } catch (error) {
+      console.error("Error fetching notes from DB:", error.message);
     }
   };
 
@@ -111,6 +132,7 @@ export default function App() {
     if (isAuthenticated) {
       fetchTradesFromDB();
       fetchStopsFromDB();
+      fetchNotesFromDB(); // Initialize notes on login
     }
   }, [startDate, endDate, isAuthenticated]);
 
@@ -129,6 +151,24 @@ export default function App() {
         if (error) {
           console.error("Supabase Delete Error:", error);
           return;
+        }
+      }
+    } catch (error) {
+      console.error("Network or code error:", error.message);
+    }
+  };
+
+  // NEW: Sync notes back to Supabase automatically
+  const syncTradeNote = async (posId, note) => {
+    try {
+      if (!note || note.trim() === '') {
+        const { error } = await supabase.from('trade_notes').delete().eq('position_id', posId);
+        if (error) console.error("Supabase Delete Note Error:", error);
+      } else {
+        const { error } = await supabase.from('trade_notes').upsert({ position_id: posId, note: note });
+        if (error) {
+          console.error("Supabase Save Note Error:", error);
+          alert(`Failed to save note: ${error.message}`);
         }
       }
     } catch (error) {
@@ -519,7 +559,6 @@ export default function App() {
                 {uniqueTickers.length > 0 && (
                   <select 
                     value={portfolioFilter} 
-                    // UPDATED: Sync both filters here
                     onChange={(e) => {
                       setPortfolioFilter(e.target.value);
                       setHistoryFilter(e.target.value);
@@ -627,7 +666,6 @@ export default function App() {
             {uniqueTickers.length > 0 && (
               <select 
                 value={historyFilter} 
-                // UPDATED: Sync both filters here as well
                 onChange={(e) => {
                   setHistoryFilter(e.target.value);
                   setPortfolioFilter(e.target.value);
@@ -757,7 +795,7 @@ export default function App() {
             </h3>
             <div ref={chartContainerRef} style={{ flex: 1, width: '100%', minHeight: '400px', border: '1px solid #ddd', borderRadius: '4px' }} />
 
-            {/* OPEN Position Analytics */}
+            {/* OPEN Position Analytics with NOTES */}
             {selectedTicker && Object.values(tickerStats)
               .filter(stat => stat.ticker === selectedTicker && stat.qty > 0)
               .map((stat) => {
@@ -804,12 +842,23 @@ export default function App() {
                         <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#333' }}>{openHeat !== null ? `$${openHeat.toFixed(2)}` : 'Set Stop Price'}</div>
                       </div>
                     </div>
+                    {/* NEW: Trade Notes Field */}
+                    <div style={{ marginTop: '15px' }}>
+                      <div style={{ fontSize: '11px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold', marginBottom: '5px' }}>Trade Notes</div>
+                      <textarea 
+                        value={tradeNotes[stat.id] || ''}
+                        onChange={(e) => setTradeNotes({...tradeNotes, [stat.id]: e.target.value})}
+                        onBlur={(e) => syncTradeNote(stat.id, e.target.value)}
+                        placeholder="Add notes, thesis, or reflections for this trade cycle..."
+                        style={{ width: '100%', minHeight: '60px', padding: '10px', borderRadius: '6px', border: '1px solid #bbdefb', boxSizing: 'border-box', fontFamily: 'inherit', fontSize: '13px', resize: 'vertical' }}
+                      />
+                    </div>
                   </div>
                 );
               })
             }
 
-            {/* CLOSED Position Analytics */}
+            {/* CLOSED Position Analytics with NOTES */}
             {selectedTicker && Object.values(tickerStats)
               .filter(stat => stat.ticker === selectedTicker && stat.qty === 0)
               .map((stat) => {
@@ -832,6 +881,17 @@ export default function App() {
                         <div style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>P/L %</div>
                         <div style={{ fontSize: '18px', fontWeight: 'bold', color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f' }}>{stat.totalClosedCost > 0 ? (stat.realizedPL >= 0 ? '+' : '') + ((stat.realizedPL / stat.totalClosedCost) * 100).toFixed(2) + '%' : '0.00%'}</div>
                       </div>
+                    </div>
+                    {/* NEW: Trade Notes Field */}
+                    <div style={{ marginTop: '15px' }}>
+                      <div style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold', marginBottom: '5px' }}>Trade Notes</div>
+                      <textarea 
+                        value={tradeNotes[stat.id] || ''}
+                        onChange={(e) => setTradeNotes({...tradeNotes, [stat.id]: e.target.value})}
+                        onBlur={(e) => syncTradeNote(stat.id, e.target.value)}
+                        placeholder="Add notes, thesis, or reflections for this trade cycle..."
+                        style={{ width: '100%', minHeight: '60px', padding: '10px', borderRadius: '6px', border: '1px solid #ccc', boxSizing: 'border-box', fontFamily: 'inherit', fontSize: '13px', resize: 'vertical' }}
+                      />
                     </div>
                   </div>
                 );

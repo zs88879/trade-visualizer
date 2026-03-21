@@ -40,7 +40,7 @@ export default function App() {
   const [riskPrices, setRiskPrices] = useState({});
   const [tradeNotes, setTradeNotes] = useState({});
 
-  // NEW: State for Advanced Analytics
+  // Advanced Analytics State
   const [advancedStats, setAdvancedStats] = useState({
     maxDD: 0, maxWinStreak: 0, maxLossStreak: 0, avgWinDays: 0, avgLossDays: 0
   });
@@ -178,15 +178,12 @@ export default function App() {
             alert("Trades successfully synced!");
             fetchTradesFromDB(); 
           } catch (error) { alert("Failed to sync database."); }
-          event.target.value = null; 
+            event.target.value = null; 
         }
       });
     }
   };
 
-  // ==========================================
-  // NEW: EXPORT DATA FUNCTION
-  // ==========================================
   const handleExportCSV = () => {
     if (Object.keys(tickerStats).length === 0) {
       alert("No data available to export.");
@@ -227,7 +224,8 @@ export default function App() {
 
   useEffect(() => {
     if (trades.length === 0) {
-      setTickerStats({}); setDayOfWeekStats({}); setMonthlyStats({}); setAnalyzedTrades({});
+      // FIX: Changed setAnalyzedTrades({}) to setAnalyzedTrades([])
+      setTickerStats({}); setDayOfWeekStats({}); setMonthlyStats({}); setAnalyzedTrades([]); 
       setAdvancedStats({ maxDD: 0, maxWinStreak: 0, maxLossStreak: 0, avgWinDays: 0, avgLossDays: 0 });
       return;
     }
@@ -236,7 +234,7 @@ export default function App() {
     const mStats = {}; 
     const positionCounters = {}; 
     const enrichedTradesList = [];
-    let realizedEvents = []; // NEW: Tracking precise sell events for drawdown calcs
+    let realizedEvents = []; 
     
     trades.forEach(trade => {
       if (positionCounters[trade.ticker] === undefined) positionCounters[trade.ticker] = 1;
@@ -250,7 +248,7 @@ export default function App() {
           id: posId, ticker: trade.ticker, positionNum: currentPosNum,
           qty: 0, totalCost: 0, realizedPL: 0, avgCost: 0, currentPrice: 0, openPL: 0,
           openLots: [], totalDaysHeld: 0, sharesClosed: 0, tradesClosed: 0, winningTrades: 0, losingTrades: 0, grossProfit: 0, grossLoss: 0, totalClosedCost: 0,
-          winDays: 0, winShares: 0, lossDays: 0, lossShares: 0 // NEW: Split hold time tracking
+          winDays: 0, winShares: 0, lossDays: 0, lossShares: 0
         };
       }
       
@@ -277,7 +275,7 @@ export default function App() {
         if (pl > 0) { s.grossProfit += pl; s.winningTrades++; }
         else if (pl < 0) { s.grossLoss += Math.abs(pl); s.losingTrades++; }
 
-        realizedEvents.push({ date: tradeDate, pl: pl }); // Record event for Drawdown
+        realizedEvents.push({ date: tradeDate, pl: pl }); 
 
         const yyyy = tradeDate.getFullYear();
         const mm = String(tradeDate.getMonth() + 1).padStart(2, '0');
@@ -301,7 +299,6 @@ export default function App() {
           s.totalDaysHeld += (daysHeld * closeQty);
           s.sharesClosed += closeQty;
 
-          // NEW: Bucket days held by win vs loss
           if (pl > 0) {
             s.winDays += (daysHeld * closeQty);
             s.winShares += closeQty;
@@ -322,9 +319,6 @@ export default function App() {
     setMonthlyStats(mStats); 
     setAnalyzedTrades(enrichedTradesList);
 
-    // ==========================================
-    // NEW: ADVANCED ANALYTICS ALGORITHMS
-    // ==========================================
     realizedEvents.sort((a, b) => a.date - b.date);
     
     let peak = 0; let maxDD = 0; let cumulative = 0;
@@ -332,13 +326,11 @@ export default function App() {
     let curLoss = 0, maxLossStreak = 0;
 
     realizedEvents.forEach(e => {
-      // 1. Max Drawdown logic
       cumulative += e.pl;
       if (cumulative > peak) peak = cumulative;
       let drawdown = peak - cumulative;
       if (drawdown > maxDD) maxDD = drawdown;
 
-      // 2. Streaks logic
       if (e.pl > 0) {
         curWin++; maxWinStreak = Math.max(maxWinStreak, curWin);
         curLoss = 0;
@@ -348,7 +340,6 @@ export default function App() {
       }
     });
 
-    // 3. Global Win/Loss Hold Time logic
     let totalWinDays = 0, totalWinShares = 0;
     let totalLossDays = 0, totalLossShares = 0;
     Object.values(stats).forEach(s => {
@@ -582,7 +573,6 @@ export default function App() {
             Calculator
           </button>
 
-          {/* NEW: Export CSV Button */}
           <button onClick={handleExportCSV} style={{ padding: '8px 12px', backgroundColor: '#1565c0', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
             Export Journal
@@ -822,7 +812,7 @@ export default function App() {
                 <div style={{ fontSize: '24px', fontWeight: 'bold', color: totalOpenRisk > 0 ? '#d32f2f' : '#2e7d32' }}>{totalOpenRisk >= 0 ? '' : '-'}${Math.abs(totalOpenRisk).toFixed(2)}</div>
               </div>
 
-              {/* NEW Row 2: Advanced Stats */}
+              {/* Row 2: Advanced Stats */}
               <div style={{ flexBasis: '100%', height: '0' }}></div> {/* Line Break */}
               
               <div style={{ flex: 1, minWidth: '140px', padding: '15px', backgroundColor: '#ffebee', borderRadius: '8px', border: '1px solid #ffcdd2' }}>

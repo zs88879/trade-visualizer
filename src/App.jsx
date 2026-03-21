@@ -40,7 +40,7 @@ export default function App() {
   const [riskPrices, setRiskPrices] = useState({});
   const [tradeNotes, setTradeNotes] = useState({});
 
-  // NEW: Account Equity State (persisted to localStorage)
+  // Account Equity State (persisted to localStorage)
   const [accountEquity, setAccountEquity] = useState(() => localStorage.getItem('trade_journal_equity') || '');
 
   const [advancedStats, setAdvancedStats] = useState({
@@ -66,7 +66,6 @@ export default function App() {
   const [calcHighOfDay, setCalcHighOfDay] = useState(null); 
   const [calcLowOfDay, setCalcLowOfDay] = useState(null); 
 
-  // Save equity to local storage whenever it changes
   useEffect(() => { localStorage.setItem('trade_journal_equity', accountEquity); }, [accountEquity]);
 
   const handleLogin = (e) => {
@@ -279,29 +278,22 @@ export default function App() {
     fetchCurrentPrices();
   }, [trades]);
 
-// 1. CHART INITIALIZATION
   useEffect(() => {
-    // ONLY initialize the chart if the tab is active and visible
     if (isAuthenticated && chartContainerRef.current && activeTab === 'chart') {
       const chart = createChart(chartContainerRef.current, {
         width: chartContainerRef.current.clientWidth || 800, 
-        height: 500,
+        height: 600, // INCREASED CHART HEIGHT TO 600px
         layout: { background: { color: '#ffffff' }, textColor: '#333', fontSize: 10 },
         grid: { vertLines: { color: '#eee' }, horzLines: { color: '#eee' } },
       });
-      const candlestickSeries = chart.addSeries(CandlestickSeries, { 
-        upColor: '#26a69a', downColor: '#ef5350', borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350' 
-      });
+      const candlestickSeries = chart.addSeries(CandlestickSeries, { upColor: '#26a69a', downColor: '#ef5350', borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350' });
       chartRef.current = chart; seriesRef.current = candlestickSeries;
       return () => { chart.remove(); markersRef.current = null; };
     }
   }, [isAuthenticated, activeTab]);
 
-  // 2. DATA FETCHING & POPULATION
   useEffect(() => {
-    // Add activeTab check here so it doesn't try to draw on a hidden canvas
     if (!selectedTicker || !seriesRef.current || activeTab !== 'chart') return;
-    
     const fetchMarketData = async () => {
       const tickerTrades = analyzedTrades.filter((t) => t.ticker === selectedTicker);
       if (tickerTrades.length === 0) return;
@@ -329,9 +321,8 @@ export default function App() {
       } catch (error) {}
     };
     fetchMarketData();
-  // We added activeTab to this dependency array so it refetches when you switch back to the chart tab!
   }, [selectedTicker, analyzedTrades, activeTab]);
-  
+
   const handleCalcTickerBlur = async () => {
     if (!calcTicker) return; setIsFetchingPrice(true); setCalcHighOfDay(null); setCalcLowOfDay(null);
     try {
@@ -454,7 +445,6 @@ export default function App() {
           <div style={{ borderLeft: '2px solid #ddd', height: '24px' }}></div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            {/* NEW: Account Equity Input */}
             <div title="Your Total Portfolio Value (Cash + Invested). Automatically saves to your browser." style={{ display: 'flex', alignItems: 'center', backgroundColor: '#e3f2fd', padding: '4px 8px', borderRadius: '4px', border: '1px solid #90caf9' }}>
               <label style={{ fontSize: '12px', fontWeight: 'bold', color: '#1565c0', marginRight: '6px', textTransform: 'uppercase' }}>Equity $:</label>
               <input type="number" value={accountEquity} onChange={(e) => setAccountEquity(e.target.value)} style={{ padding: '4px', borderRadius: '4px', border: '1px solid #ccc', width: '100px', outline: 'none' }} placeholder="100000" />
@@ -668,63 +658,58 @@ export default function App() {
           {statsArray.length > 0 && (
             <div style={{ display: 'flex', gap: '15px', marginBottom: '20px', flexWrap: 'wrap' }}>
               
-              {/* Row 1: Core Stats (WITH TOOLTIPS) */}
-              <div title="Gross Profit divided by Gross Loss across all closed trades." style={{ flex: 1, minWidth: '120px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
-                <div style={{ fontSize: '12px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Profit Factor</div>
-                <div style={{ fontSize: '24px', fontWeight: 'bold', color: profitFactor > 1 || profitFactor === 'MAX' ? '#2e7d32' : '#d32f2f' }}>{profitFactor}</div>
+              {/* Row 1: Core Stats (COMPACT FONT/PADDING) */}
+              <div title="Gross Profit divided by Gross Loss across all closed trades." style={{ flex: 1, minWidth: '120px', padding: '12px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
+                <div style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Profit Factor</div>
+                <div style={{ fontSize: '20px', fontWeight: 'bold', color: profitFactor > 1 || profitFactor === 'MAX' ? '#2e7d32' : '#d32f2f' }}>{profitFactor}</div>
               </div>
-              <div title="Percentage of closed trades that resulted in a profit." style={{ flex: 1, minWidth: '120px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
-                <div style={{ fontSize: '12px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Win Rate</div>
-                <div style={{ fontSize: '24px', fontWeight: 'bold', color: winRate >= 50 ? '#2e7d32' : '#d32f2f' }}>{winRate}%</div>
+              <div title="Percentage of closed trades that resulted in a profit." style={{ flex: 1, minWidth: '120px', padding: '12px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
+                <div style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Win Rate</div>
+                <div style={{ fontSize: '20px', fontWeight: 'bold', color: winRate >= 50 ? '#2e7d32' : '#d32f2f' }}>{winRate}%</div>
               </div>
-              <div title="Total realized profit minus total realized loss." style={{ flex: 1, minWidth: '140px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
-                <div style={{ fontSize: '12px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Net Realized P/L</div>
-                <div style={{ fontSize: '24px', fontWeight: 'bold', color: totalRealizedPL >= 0 ? '#2e7d32' : '#d32f2f' }}>{totalRealizedPL >= 0 ? '+' : '-'}${Math.abs(totalRealizedPL).toFixed(2)}</div>
+              <div title="Total realized profit minus total realized loss." style={{ flex: 1, minWidth: '140px', padding: '12px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
+                <div style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Net Realized P/L</div>
+                <div style={{ fontSize: '20px', fontWeight: 'bold', color: totalRealizedPL >= 0 ? '#2e7d32' : '#d32f2f' }}>{totalRealizedPL >= 0 ? '+' : '-'}${Math.abs(totalRealizedPL).toFixed(2)}</div>
               </div>
-
-              {/* NEW: Total Invested Portfolio % */}
-              <div title="Total capital currently deployed in open positions as a percentage of your Account Equity." style={{ flex: 1, minWidth: '140px', padding: '15px', backgroundColor: '#e8f5e9', borderRadius: '8px', border: '1px solid #c8e6c9', cursor: 'help' }}>
-                <div style={{ fontSize: '12px', color: '#2e7d32', textTransform: 'uppercase', fontWeight: 'bold' }}>Total Invested</div>
-                <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2e7d32' }}>
-                  ${totalInvested.toFixed(0)} <span style={{fontSize: '14px', fontWeight: 'normal'}}>({totalPosPct}%)</span>
+              <div title="Total capital currently deployed in open positions as a percentage of your Account Equity." style={{ flex: 1, minWidth: '140px', padding: '12px', backgroundColor: '#e8f5e9', borderRadius: '8px', border: '1px solid #c8e6c9', cursor: 'help' }}>
+                <div style={{ fontSize: '11px', color: '#2e7d32', textTransform: 'uppercase', fontWeight: 'bold' }}>Total Invested</div>
+                <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#2e7d32' }}>
+                  ${totalInvested.toFixed(0)} <span style={{fontSize: '12px', fontWeight: 'normal'}}>({totalPosPct}%)</span>
+                </div>
+              </div>
+              <div title="Amount of open equity at risk: (Current Price - Stop Price) × Open Shares." style={{ flex: 1, minWidth: '140px', padding: '12px', backgroundColor: '#e3f2fd', borderRadius: '8px', border: '1px solid #bbdefb', cursor: 'help' }}>
+                <div style={{ fontSize: '11px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Total Open Heat</div>
+                <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#1565c0' }}>${totalOpenHeat.toFixed(2)}</div>
+              </div>
+              <div title="Amount of initial capital at risk: (Avg Cost - Stop Price) × Open Shares. % is based on Account Equity." style={{ flex: 1, minWidth: '140px', padding: '12px', backgroundColor: '#fff3e0', borderRadius: '8px', border: '1px solid #ffe0b2', cursor: 'help' }}>
+                <div style={{ fontSize: '11px', color: '#e65100', textTransform: 'uppercase', fontWeight: 'bold' }}>Total Open Risk</div>
+                <div style={{ fontSize: '20px', fontWeight: 'bold', color: totalOpenRisk > 0 ? '#d32f2f' : '#2e7d32' }}>
+                  {totalOpenRisk >= 0 ? '' : '-'}${Math.abs(totalOpenRisk).toFixed(2)} <span style={{fontSize: '12px', fontWeight: 'normal'}}>({globalRiskPct}%)</span>
                 </div>
               </div>
 
-              <div title="Amount of open equity at risk: (Current Price - Stop Price) × Open Shares." style={{ flex: 1, minWidth: '140px', padding: '15px', backgroundColor: '#e3f2fd', borderRadius: '8px', border: '1px solid #bbdefb', cursor: 'help' }}>
-                <div style={{ fontSize: '12px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Total Open Heat</div>
-                <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1565c0' }}>${totalOpenHeat.toFixed(2)}</div>
-              </div>
-
-              {/* UPDATED: Open Risk Portfolio % */}
-              <div title="Amount of initial capital at risk: (Avg Cost - Stop Price) × Open Shares. % is based on Account Equity." style={{ flex: 1, minWidth: '140px', padding: '15px', backgroundColor: '#fff3e0', borderRadius: '8px', border: '1px solid #ffe0b2', cursor: 'help' }}>
-                <div style={{ fontSize: '12px', color: '#e65100', textTransform: 'uppercase', fontWeight: 'bold' }}>Total Open Risk</div>
-                <div style={{ fontSize: '24px', fontWeight: 'bold', color: totalOpenRisk > 0 ? '#d32f2f' : '#2e7d32' }}>
-                  {totalOpenRisk >= 0 ? '' : '-'}${Math.abs(totalOpenRisk).toFixed(2)} <span style={{fontSize: '14px', fontWeight: 'normal'}}>({globalRiskPct}%)</span>
-                </div>
-              </div>
-
-              {/* Row 2: Advanced Stats (WITH TOOLTIPS) */}
-              <div style={{ flexBasis: '100%', height: '0' }}></div> {/* Line Break */}
+              {/* Row 2: Advanced Stats */}
+              <div style={{ flexBasis: '100%', height: '0' }}></div> 
               
-              <div title="The largest peak-to-trough drop in your cumulative realized P/L." style={{ flex: 1, minWidth: '140px', padding: '15px', backgroundColor: '#ffebee', borderRadius: '8px', border: '1px solid #ffcdd2', cursor: 'help' }}>
-                <div style={{ fontSize: '12px', color: '#c62828', textTransform: 'uppercase', fontWeight: 'bold' }}>Max Drawdown</div>
-                <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#c62828' }}>-${Math.abs(advancedStats.maxDD).toFixed(2)}</div>
+              <div title="The largest peak-to-trough drop in your cumulative realized P/L." style={{ flex: 1, minWidth: '140px', padding: '12px', backgroundColor: '#ffebee', borderRadius: '8px', border: '1px solid #ffcdd2', cursor: 'help' }}>
+                <div style={{ fontSize: '11px', color: '#c62828', textTransform: 'uppercase', fontWeight: 'bold' }}>Max Drawdown</div>
+                <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#c62828' }}>-${Math.abs(advancedStats.maxDD).toFixed(2)}</div>
               </div>
-              <div title="Average number of days positions were held before closing." style={{ flex: 1, minWidth: '120px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
-                <div style={{ fontSize: '12px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Avg Hold (Overall)</div>
-                <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#333' }}>{globalAvgDaysHeld} Days</div>
+              <div title="Average number of days positions were held before closing." style={{ flex: 1, minWidth: '120px', padding: '12px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
+                <div style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Avg Hold (Overall)</div>
+                <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#333' }}>{globalAvgDaysHeld} Days</div>
               </div>
-              <div title="Average days held for trades that closed in profit." style={{ flex: 1, minWidth: '140px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
-                <div style={{ fontSize: '12px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Avg Hold (Wins)</div>
-                <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2e7d32' }}>{advancedStats.avgWinDays} Days</div>
+              <div title="Average days held for trades that closed in profit." style={{ flex: 1, minWidth: '140px', padding: '12px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
+                <div style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Avg Hold (Wins)</div>
+                <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#2e7d32' }}>{advancedStats.avgWinDays} Days</div>
               </div>
-              <div title="Average days held for trades that closed at a loss." style={{ flex: 1, minWidth: '140px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
-                <div style={{ fontSize: '12px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Avg Hold (Losses)</div>
-                <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#d32f2f' }}>{advancedStats.avgLossDays} Days</div>
+              <div title="Average days held for trades that closed at a loss." style={{ flex: 1, minWidth: '140px', padding: '12px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
+                <div style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Avg Hold (Losses)</div>
+                <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#d32f2f' }}>{advancedStats.avgLossDays} Days</div>
               </div>
-              <div title="Longest consecutive streak of winning trades (W) and losing trades (L)." style={{ flex: 1, minWidth: '140px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
-                <div style={{ fontSize: '12px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Max Streaks</div>
-                <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#333' }}>
+              <div title="Longest consecutive streak of winning trades (W) and losing trades (L)." style={{ flex: 1, minWidth: '140px', padding: '12px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
+                <div style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Max Streaks</div>
+                <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#333' }}>
                   <span style={{ color: '#2e7d32' }}>{advancedStats.maxWinStreak}W</span> / <span style={{ color: '#d32f2f' }}>{advancedStats.maxLossStreak}L</span>
                 </div>
               </div>
@@ -743,9 +728,10 @@ export default function App() {
           {/* ========================================= */}
           <div style={{ display: activeTab === 'chart' ? 'block' : 'none' }}>
             <h3 style={{ marginTop: 0 }}>{selectedTicker ? `${selectedTicker} Daily Chart` : 'Select a trade to view the chart'}</h3>
-            <div ref={chartContainerRef} style={{ flex: 1, width: '100%', minHeight: '400px', border: '1px solid #ddd', borderRadius: '4px' }} />
+            {/* INCREASED CHART CONTAINER HEIGHT */}
+            <div ref={chartContainerRef} style={{ flex: 1, width: '100%', minHeight: '600px', border: '1px solid #ddd', borderRadius: '4px' }} />
 
-            {/* OPEN Position Analytics with NOTES */}
+            {/* OPEN Position Analytics with NOTES (COMPACT FONT/PADDING) */}
             {selectedTicker && Object.values(tickerStats)
               .filter(stat => stat.ticker === selectedTicker && stat.qty > 0)
               .map((stat) => {
@@ -759,44 +745,43 @@ export default function App() {
                 const riskPct = !isNaN(stopPrice) && stat.avgCost > 0 ? (((stat.avgCost - stopPrice) / stat.avgCost) * 100).toFixed(2) : null;
                 const openHeat = !isNaN(stopPrice) && stat.currentPrice > 0 ? (stat.currentPrice - stopPrice) * stat.qty : null;
                 
-                // NEW: Calculate specific position size %
                 const indPosSizePct = parsedEquity > 0 ? (((stat.qty * stat.avgCost) / parsedEquity) * 100).toFixed(2) + '%' : '--';
 
                 return (
-                  <div key={stat.id} style={{ marginTop: '20px', padding: '15px', backgroundColor: '#e3f2fd', borderRadius: '8px', border: '1px solid #90caf9' }}>
-                    <h4 style={{ margin: '0 0 15px 0', color: '#1565c0' }}>{displayName} Live Position Analytics</h4>
+                  <div key={stat.id} style={{ marginTop: '20px', padding: '12px', backgroundColor: '#e3f2fd', borderRadius: '8px', border: '1px solid #90caf9' }}>
+                    <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: '#1565c0' }}>{displayName} Live Position Analytics</h4>
                     <div style={{ display: 'flex', gap: '15px', flexWrap: 'wrap' }}>
-                      <div style={{ flex: 1, minWidth: '120px', padding: '10px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #bbdefb' }}>
-                        <div style={{ fontSize: '11px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Open P/L</div>
-                        <div style={{ fontSize: '18px', fontWeight: 'bold', color: stat.openPL >= 0 ? '#2e7d32' : '#d32f2f' }}>{stat.openPL >= 0 ? '+' : '-'}${Math.abs(stat.openPL).toFixed(2)}</div>
+                      <div style={{ flex: 1, minWidth: '120px', padding: '8px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #bbdefb' }}>
+                        <div style={{ fontSize: '10px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Open P/L</div>
+                        <div style={{ fontSize: '16px', fontWeight: 'bold', color: stat.openPL >= 0 ? '#2e7d32' : '#d32f2f' }}>{stat.openPL >= 0 ? '+' : '-'}${Math.abs(stat.openPL).toFixed(2)}</div>
                       </div>
-                      <div style={{ flex: 1, minWidth: '120px', padding: '10px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #bbdefb' }}>
-                        <div style={{ fontSize: '11px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Pos Sizing (%)</div>
-                        <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#333' }}>{indPosSizePct}</div>
+                      <div style={{ flex: 1, minWidth: '120px', padding: '8px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #bbdefb' }}>
+                        <div style={{ fontSize: '10px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Pos Sizing (%)</div>
+                        <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#333' }}>{indPosSizePct}</div>
                       </div>
-                      <div style={{ flex: 1, minWidth: '120px', padding: '10px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #bbdefb' }}>
-                        <div style={{ fontSize: '11px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Current Days Held</div>
-                        <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#333' }}>{currentDaysHeld} Days</div>
+                      <div style={{ flex: 1, minWidth: '120px', padding: '8px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #bbdefb' }}>
+                        <div style={{ fontSize: '10px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Current Days Held</div>
+                        <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#333' }}>{currentDaysHeld} Days</div>
                       </div>
-                      <div style={{ flex: 1, minWidth: '120px', padding: '10px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #bbdefb' }}>
-                        <div style={{ fontSize: '11px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Open Risk</div>
-                        <div style={{ fontSize: '18px', fontWeight: 'bold', color: openRisk === null ? '#888' : (openRisk > 0 ? '#d32f2f' : '#2e7d32') }}>{openRisk !== null ? `$${openRisk.toFixed(2)} (${riskPct}%)` : 'Set Stop'}</div>
+                      <div style={{ flex: 1, minWidth: '120px', padding: '8px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #bbdefb' }}>
+                        <div style={{ fontSize: '10px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Open Risk</div>
+                        <div style={{ fontSize: '16px', fontWeight: 'bold', color: openRisk === null ? '#888' : (openRisk > 0 ? '#d32f2f' : '#2e7d32') }}>{openRisk !== null ? `$${openRisk.toFixed(2)} (${riskPct}%)` : 'Set Stop'}</div>
                       </div>
-                      <div style={{ flex: 1, minWidth: '120px', padding: '10px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #bbdefb' }}>
-                        <div style={{ fontSize: '11px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Open Heat</div>
-                        <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#333' }}>{openHeat !== null ? `$${openHeat.toFixed(2)}` : 'Set Stop'}</div>
+                      <div style={{ flex: 1, minWidth: '120px', padding: '8px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #bbdefb' }}>
+                        <div style={{ fontSize: '10px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Open Heat</div>
+                        <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#333' }}>{openHeat !== null ? `$${openHeat.toFixed(2)}` : 'Set Stop'}</div>
                       </div>
                     </div>
-                    <div style={{ marginTop: '15px' }}>
-                      <div style={{ fontSize: '11px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold', marginBottom: '5px' }}>Trade Notes</div>
-                      <textarea value={tradeNotes[stat.id] || ''} onChange={(e) => setTradeNotes({...tradeNotes, [stat.id]: e.target.value})} onBlur={(e) => syncTradeNote(stat.id, e.target.value)} placeholder="Add notes, thesis, or reflections for this trade cycle..." style={{ width: '100%', minHeight: '60px', padding: '10px', borderRadius: '6px', border: '1px solid #bbdefb', boxSizing: 'border-box', fontFamily: 'inherit', fontSize: '13px', resize: 'vertical' }} />
+                    <div style={{ marginTop: '12px' }}>
+                      <div style={{ fontSize: '10px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold', marginBottom: '4px' }}>Trade Notes</div>
+                      <textarea value={tradeNotes[stat.id] || ''} onChange={(e) => setTradeNotes({...tradeNotes, [stat.id]: e.target.value})} onBlur={(e) => syncTradeNote(stat.id, e.target.value)} placeholder="Add notes, thesis, or reflections for this trade cycle..." style={{ width: '100%', minHeight: '40px', padding: '8px', borderRadius: '6px', border: '1px solid #bbdefb', boxSizing: 'border-box', fontFamily: 'inherit', fontSize: '13px', resize: 'vertical' }} />
                     </div>
                   </div>
                 );
               })
             }
 
-            {/* CLOSED Position Analytics with NOTES */}
+            {/* CLOSED Position Analytics with NOTES (COMPACT FONT/PADDING) */}
             {selectedTicker && Object.values(tickerStats)
               .filter(stat => stat.ticker === selectedTicker && stat.qty === 0)
               .map((stat) => {
@@ -804,25 +789,25 @@ export default function App() {
                 const displayName = totalTickerPositions > 1 ? `${stat.ticker} (Trade #${stat.positionNum})` : stat.ticker;
                 
                 return (
-                  <div key={stat.id} style={{ marginTop: '20px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0' }}>
-                    <h4 style={{ margin: '0 0 15px 0', color: '#333' }}>{displayName} Closed Position Analytics</h4>
+                  <div key={stat.id} style={{ marginTop: '20px', padding: '12px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0' }}>
+                    <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: '#333' }}>{displayName} Closed Position Analytics</h4>
                     <div style={{ display: 'flex', gap: '15px', flexWrap: 'wrap' }}>
-                      <div style={{ flex: 1, minWidth: '120px', padding: '10px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #ddd' }}>
-                        <div style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Days to Hold</div>
-                        <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#333' }}>{stat.sharesClosed > 0 ? (stat.totalDaysHeld / stat.sharesClosed).toFixed(1) : 0} Days</div>
+                      <div style={{ flex: 1, minWidth: '120px', padding: '8px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #ddd' }}>
+                        <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Days to Hold</div>
+                        <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#333' }}>{stat.sharesClosed > 0 ? (stat.totalDaysHeld / stat.sharesClosed).toFixed(1) : 0} Days</div>
                       </div>
-                      <div style={{ flex: 1, minWidth: '120px', padding: '10px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #ddd' }}>
-                        <div style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>P/L $</div>
-                        <div style={{ fontSize: '18px', fontWeight: 'bold', color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f' }}>{stat.realizedPL >= 0 ? '+' : '-'}${Math.abs(stat.realizedPL).toFixed(2)}</div>
+                      <div style={{ flex: 1, minWidth: '120px', padding: '8px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #ddd' }}>
+                        <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>P/L $</div>
+                        <div style={{ fontSize: '16px', fontWeight: 'bold', color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f' }}>{stat.realizedPL >= 0 ? '+' : '-'}${Math.abs(stat.realizedPL).toFixed(2)}</div>
                       </div>
-                      <div style={{ flex: 1, minWidth: '120px', padding: '10px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #ddd' }}>
-                        <div style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>P/L %</div>
-                        <div style={{ fontSize: '18px', fontWeight: 'bold', color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f' }}>{stat.totalClosedCost > 0 ? (stat.realizedPL >= 0 ? '+' : '') + ((stat.realizedPL / stat.totalClosedCost) * 100).toFixed(2) + '%' : '0.00%'}</div>
+                      <div style={{ flex: 1, minWidth: '120px', padding: '8px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #ddd' }}>
+                        <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>P/L %</div>
+                        <div style={{ fontSize: '16px', fontWeight: 'bold', color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f' }}>{stat.totalClosedCost > 0 ? (stat.realizedPL >= 0 ? '+' : '') + ((stat.realizedPL / stat.totalClosedCost) * 100).toFixed(2) + '%' : '0.00%'}</div>
                       </div>
                     </div>
-                    <div style={{ marginTop: '15px' }}>
-                      <div style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold', marginBottom: '5px' }}>Trade Notes</div>
-                      <textarea value={tradeNotes[stat.id] || ''} onChange={(e) => setTradeNotes({...tradeNotes, [stat.id]: e.target.value})} onBlur={(e) => syncTradeNote(stat.id, e.target.value)} placeholder="Add notes, thesis, or reflections for this trade cycle..." style={{ width: '100%', minHeight: '60px', padding: '10px', borderRadius: '6px', border: '1px solid #ccc', boxSizing: 'border-box', fontFamily: 'inherit', fontSize: '13px', resize: 'vertical' }} />
+                    <div style={{ marginTop: '12px' }}>
+                      <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold', marginBottom: '4px' }}>Trade Notes</div>
+                      <textarea value={tradeNotes[stat.id] || ''} onChange={(e) => setTradeNotes({...tradeNotes, [stat.id]: e.target.value})} onBlur={(e) => syncTradeNote(stat.id, e.target.value)} placeholder="Add notes, thesis, or reflections for this trade cycle..." style={{ width: '100%', minHeight: '40px', padding: '8px', borderRadius: '6px', border: '1px solid #ccc', boxSizing: 'border-box', fontFamily: 'inherit', fontSize: '13px', resize: 'vertical' }} />
                     </div>
                   </div>
                 );
@@ -840,7 +825,6 @@ export default function App() {
                   <th style={{ padding: '12px 10px', textAlign: 'left', color: '#555' }}>Position</th>
                   <th style={{ padding: '12px 10px', textAlign: 'center', color: '#555' }}>Status</th>
                   <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Qty</th>
-                  {/* NEW TABLE COLUMN */}
                   <th title="Percentage of Account Equity allocated to this position." style={{ padding: '12px 10px', textAlign: 'right', color: '#555', cursor: 'help' }}>Pos %</th>
                   <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Realized P/L</th>
                   <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Open P/L</th>
@@ -874,8 +858,6 @@ export default function App() {
                     const stopPrice = parseFloat(riskPrices[stat.id]);
                     const openRisk = !isClosed && !isNaN(stopPrice) ? (stat.avgCost - stopPrice) * stat.qty : null;
                     const openHeat = !isClosed && !isNaN(stopPrice) && stat.currentPrice > 0 ? (stat.currentPrice - stopPrice) * stat.qty : null;
-                    
-                    // NEW: Table specific Pos %
                     const tablePosSizePct = !isClosed && parsedEquity > 0 ? (((stat.qty * stat.avgCost) / parsedEquity) * 100).toFixed(2) + '%' : '--';
 
                     return (
@@ -883,9 +865,7 @@ export default function App() {
                         <td style={{ padding: '12px 10px', fontWeight: 'bold' }}>{displayName}</td>
                         <td style={{ padding: '12px 10px', textAlign: 'center' }}><span style={{ padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 'bold', backgroundColor: isClosed ? '#e0e0e0' : '#bbdefb', color: isClosed ? '#666' : '#1565c0' }}>{isClosed ? 'CLOSED' : 'OPEN'}</span></td>
                         <td style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 'bold' }}>{stat.qty}</td>
-                        {/* NEW ROW DATA */}
                         <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333' }}>{tablePosSizePct}</td>
-                        
                         <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{stat.realizedPL >= 0 ? '+' : ''}{stat.realizedPL === 0 ? '--' : '$' + stat.realizedPL.toFixed(2)}</td>
                         <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.openPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{isClosed ? '--' : (stat.openPL >= 0 ? '+' : '') + '$' + stat.openPL.toFixed(2)}</td>
                         <td style={{ padding: '12px 10px', textAlign: 'center', color: '#555' }}>{posWinRate} / {posPF}</td>

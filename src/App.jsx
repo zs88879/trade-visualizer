@@ -224,7 +224,6 @@ export default function App() {
 
   useEffect(() => {
     if (trades.length === 0) {
-      // FIX: Changed setAnalyzedTrades({}) to setAnalyzedTrades([])
       setTickerStats({}); setDayOfWeekStats({}); setMonthlyStats({}); setAnalyzedTrades([]); 
       setAdvancedStats({ maxDD: 0, maxWinStreak: 0, maxLossStreak: 0, avgWinDays: 0, avgLossDays: 0 });
       return;
@@ -786,48 +785,49 @@ export default function App() {
           {/* Top Analytics Dashboard */}
           {statsArray.length > 0 && (
             <div style={{ display: 'flex', gap: '15px', marginBottom: '20px', flexWrap: 'wrap' }}>
-              {/* Row 1: Core Stats */}
-              <div style={{ flex: 1, minWidth: '120px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0' }}>
+              
+              {/* Row 1: Core Stats (WITH TOOLTIPS) */}
+              <div title="Gross Profit divided by Gross Loss across all closed trades." style={{ flex: 1, minWidth: '120px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
                 <div style={{ fontSize: '12px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Profit Factor</div>
                 <div style={{ fontSize: '24px', fontWeight: 'bold', color: profitFactor > 1 || profitFactor === 'MAX' ? '#2e7d32' : '#d32f2f' }}>{profitFactor}</div>
               </div>
-              <div style={{ flex: 1, minWidth: '120px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0' }}>
+              <div title="Percentage of closed trades that resulted in a profit." style={{ flex: 1, minWidth: '120px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
                 <div style={{ fontSize: '12px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Win Rate</div>
                 <div style={{ fontSize: '24px', fontWeight: 'bold', color: winRate >= 50 ? '#2e7d32' : '#d32f2f' }}>{winRate}%</div>
               </div>
-              <div style={{ flex: 1, minWidth: '120px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0' }}>
+              <div title="Average number of days positions were held before closing." style={{ flex: 1, minWidth: '120px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
                 <div style={{ fontSize: '12px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Avg Days Held</div>
                 <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#333' }}>{globalAvgDaysHeld}</div>
               </div>
-              <div style={{ flex: 1, minWidth: '140px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0' }}>
+              <div title="Total realized profit minus total realized loss." style={{ flex: 1, minWidth: '140px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
                 <div style={{ fontSize: '12px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Net Realized P/L</div>
                 <div style={{ fontSize: '24px', fontWeight: 'bold', color: totalRealizedPL >= 0 ? '#2e7d32' : '#d32f2f' }}>{totalRealizedPL >= 0 ? '+' : '-'}${Math.abs(totalRealizedPL).toFixed(2)}</div>
               </div>
-              <div style={{ flex: 1, minWidth: '140px', padding: '15px', backgroundColor: '#e3f2fd', borderRadius: '8px', border: '1px solid #bbdefb' }}>
+              <div title="Amount of open equity at risk: (Current Price - Stop Price) × Open Shares." style={{ flex: 1, minWidth: '140px', padding: '15px', backgroundColor: '#e3f2fd', borderRadius: '8px', border: '1px solid #bbdefb', cursor: 'help' }}>
                 <div style={{ fontSize: '12px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Total Open Heat</div>
                 <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1565c0' }}>${totalOpenHeat.toFixed(2)}</div>
               </div>
-              <div style={{ flex: 1, minWidth: '140px', padding: '15px', backgroundColor: '#fff3e0', borderRadius: '8px', border: '1px solid #ffe0b2' }}>
+              <div title="Amount of initial capital at risk: (Avg Cost - Stop Price) × Open Shares." style={{ flex: 1, minWidth: '140px', padding: '15px', backgroundColor: '#fff3e0', borderRadius: '8px', border: '1px solid #ffe0b2', cursor: 'help' }}>
                 <div style={{ fontSize: '12px', color: '#e65100', textTransform: 'uppercase', fontWeight: 'bold' }}>Total Open Risk</div>
                 <div style={{ fontSize: '24px', fontWeight: 'bold', color: totalOpenRisk > 0 ? '#d32f2f' : '#2e7d32' }}>{totalOpenRisk >= 0 ? '' : '-'}${Math.abs(totalOpenRisk).toFixed(2)}</div>
               </div>
 
-              {/* Row 2: Advanced Stats */}
+              {/* Row 2: Advanced Stats (WITH TOOLTIPS) */}
               <div style={{ flexBasis: '100%', height: '0' }}></div> {/* Line Break */}
               
-              <div style={{ flex: 1, minWidth: '140px', padding: '15px', backgroundColor: '#ffebee', borderRadius: '8px', border: '1px solid #ffcdd2' }}>
+              <div title="The largest peak-to-trough drop in your cumulative realized P/L." style={{ flex: 1, minWidth: '140px', padding: '15px', backgroundColor: '#ffebee', borderRadius: '8px', border: '1px solid #ffcdd2', cursor: 'help' }}>
                 <div style={{ fontSize: '12px', color: '#c62828', textTransform: 'uppercase', fontWeight: 'bold' }}>Max Drawdown</div>
                 <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#c62828' }}>-${Math.abs(advancedStats.maxDD).toFixed(2)}</div>
               </div>
-              <div style={{ flex: 1, minWidth: '140px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0' }}>
+              <div title="Average days held for trades that closed in profit." style={{ flex: 1, minWidth: '140px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
                 <div style={{ fontSize: '12px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Avg Hold (Wins)</div>
                 <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2e7d32' }}>{advancedStats.avgWinDays} Days</div>
               </div>
-              <div style={{ flex: 1, minWidth: '140px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0' }}>
+              <div title="Average days held for trades that closed at a loss." style={{ flex: 1, minWidth: '140px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
                 <div style={{ fontSize: '12px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Avg Hold (Losses)</div>
                 <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#d32f2f' }}>{advancedStats.avgLossDays} Days</div>
               </div>
-              <div style={{ flex: 1, minWidth: '140px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0' }}>
+              <div title="Longest consecutive streak of winning trades (W) and losing trades (L)." style={{ flex: 1, minWidth: '140px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
                 <div style={{ fontSize: '12px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Max Streaks</div>
                 <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#333' }}>
                   <span style={{ color: '#2e7d32' }}>{advancedStats.maxWinStreak}W</span> / <span style={{ color: '#d32f2f' }}>{advancedStats.maxLossStreak}L</span>

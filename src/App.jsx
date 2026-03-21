@@ -48,15 +48,21 @@ export default function App() {
   const markersRef = useRef(null); 
 
   // ==========================================
-  // NEW: POSITION SIZE CALCULATOR STATE
+  // POSITION SIZE CALCULATOR STATE
   // ==========================================
   const [isCalcModalOpen, setIsCalcModalOpen] = useState(false);
+  const [calcMode, setCalcMode] = useState('position'); // 'position' or 'risk'
+  
   const [calcTicker, setCalcTicker] = useState('');
   const [calcTotalCapital, setCalcTotalCapital] = useState('');
   const [calcPositionPct, setCalcPositionPct] = useState('');
+  const [calcRiskPct, setCalcRiskPct] = useState(''); // NEW: For risk-based mode
   const [calcEntryPrice, setCalcEntryPrice] = useState('');
   const [calcStopLoss, setCalcStopLoss] = useState('');
+  
   const [isFetchingPrice, setIsFetchingPrice] = useState(false);
+  const [calcHighOfDay, setCalcHighOfDay] = useState(null); // NEW: HOD
+  const [calcLowOfDay, setCalcLowOfDay] = useState(null); // NEW: LOD
 
   const handleLogin = (e) => {
     e.preventDefault();
@@ -467,11 +473,13 @@ export default function App() {
   }, [selectedTicker, analyzedTrades]);
 
   // ==========================================
-  // NEW: FETCH LIVE PRICE FOR CALCULATOR
+  // FETCH LIVE PRICE & HOD/LOD FOR CALCULATOR
   // ==========================================
   const handleCalcTickerBlur = async () => {
     if (!calcTicker) return;
     setIsFetchingPrice(true);
+    setCalcHighOfDay(null);
+    setCalcLowOfDay(null);
     try {
       const ticker = calcTicker.toUpperCase();
       const fetchUrl = import.meta.env.PROD 
@@ -483,8 +491,17 @@ export default function App() {
       if (data.chart && data.chart.result && data.chart.result.length > 0) {
         const quote = data.chart.result[0].indicators.quote[0];
         const closes = quote.close.filter(c => c !== null && c !== undefined);
+        const highs = quote.high.filter(h => h !== null && h !== undefined);
+        const lows = quote.low.filter(l => l !== null && l !== undefined);
+        
         if (closes.length > 0) {
           setCalcEntryPrice(closes[closes.length - 1].toFixed(2));
+        }
+        if (highs.length > 0) {
+          setCalcHighOfDay(highs[highs.length - 1].toFixed(2));
+        }
+        if (lows.length > 0) {
+          setCalcLowOfDay(lows[lows.length - 1].toFixed(2));
         }
       }
     } catch (error) {
@@ -532,26 +549,44 @@ export default function App() {
   const uniqueTickers = [...new Set(trades.map(t => t.ticker))].sort();
 
   // ==========================================
-  // NEW: POSITION SIZE MATH COMPUTATIONS
+  // DUAL-MODE MATH COMPUTATIONS
   // ==========================================
   const parsedTotalCapital = parseFloat(calcTotalCapital) || 0;
   const parsedPositionPct = parseFloat(calcPositionPct) || 0;
+  const parsedRiskPct = parseFloat(calcRiskPct) || 0;
   const parsedEntryPrice = parseFloat(calcEntryPrice) || 0;
   const parsedStopLoss = parseFloat(calcStopLoss) || 0;
 
-  const calcCapitalAllocated = parsedTotalCapital * (parsedPositionPct / 100);
-  const calcShares = parsedEntryPrice > 0 ? Math.floor(calcCapitalAllocated / parsedEntryPrice) : 0;
-
+  let calcShares = 0;
+  let calcCapitalAllocated = 0;
   let calcOpenRiskDollar = 0;
   let calcOpenRiskPct = 0;
+  let calcPositionAllocPct = 0;
 
-  if (parsedEntryPrice > 0 && parsedStopLoss > 0 && parsedEntryPrice > parsedStopLoss) {
-    calcOpenRiskDollar = calcShares * (parsedEntryPrice - parsedStopLoss);
-    if (parsedTotalCapital > 0) {
-      calcOpenRiskPct = (calcOpenRiskDollar / parsedTotalCapital) * 100;
+  if (calcMode === 'position') {
+    // Mode 1: Sizing based on Position Allocation %
+    calcCapitalAllocated = parsedTotalCapital * (parsedPositionPct / 100);
+    calcShares = parsedEntryPrice > 0 ? Math.floor(calcCapitalAllocated / parsedEntryPrice) : 0;
+    
+    if (parsedEntryPrice > 0 && parsedStopLoss > 0 && parsedEntryPrice > parsedStopLoss) {
+      calcOpenRiskDollar = calcShares * (parsedEntryPrice - parsedStopLoss);
+      if (parsedTotalCapital > 0) {
+        calcOpenRiskPct = (calcOpenRiskDollar / parsedTotalCapital) * 100;
+      }
+    }
+    calcPositionAllocPct = parsedPositionPct;
+
+  } else {
+    // Mode 2: Sizing based on Portfolio Risk %
+    if (parsedEntryPrice > 0 && parsedStopLoss > 0 && parsedEntryPrice > parsedStopLoss && parsedTotalCapital > 0) {
+      calcOpenRiskDollar = parsedTotalCapital * (parsedRiskPct / 100);
+      const riskPerShare = parsedEntryPrice - parsedStopLoss;
+      calcShares = Math.floor(calcOpenRiskDollar / riskPerShare);
+      calcCapitalAllocated = calcShares * parsedEntryPrice;
+      calcPositionAllocPct = (calcCapitalAllocated / parsedTotalCapital) * 100;
+      calcOpenRiskPct = parsedRiskPct;
     }
   }
-
 
   if (!isAuthenticated) {
     return (
@@ -587,7 +622,6 @@ export default function App() {
         <h2 style={{ margin: 0 }}>Trade Visualizer</h2>
         <div style={{ display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap' }}>
           
-          {/* NEW: Position Size Calculator Button */}
           <button 
             onClick={() => setIsCalcModalOpen(true)}
             style={{ padding: '8px 12px', backgroundColor: '#2e7d32', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}
@@ -616,14 +650,30 @@ export default function App() {
         </div>
       </div>
 
-      {/* NEW: POSITION SIZE CALCULATOR MODAL OVERLAY */}
+      {/* DUAL-MODE POSITION SIZE CALCULATOR MODAL OVERLAY */}
       {isCalcModalOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
           <div style={{ backgroundColor: '#fff', padding: '25px', borderRadius: '8px', width: '420px', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }}>
             
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '2px solid #eee', paddingBottom: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '2px solid #eee', paddingBottom: '10px' }}>
               <h3 style={{ margin: 0, color: '#333' }}>Position Size Calculator</h3>
               <button onClick={() => setIsCalcModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#888' }}>&times;</button>
+            </div>
+
+            {/* Mode Toggle */}
+            <div style={{ display: 'flex', backgroundColor: '#f0f0f0', borderRadius: '6px', padding: '4px', marginBottom: '20px' }}>
+              <button 
+                onClick={() => setCalcMode('position')}
+                style={{ flex: 1, padding: '8px', border: 'none', borderRadius: '4px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', backgroundColor: calcMode === 'position' ? '#fff' : 'transparent', color: calcMode === 'position' ? '#1565c0' : '#666', boxShadow: calcMode === 'position' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none', transition: 'all 0.2s' }}
+              >
+                By Position %
+              </button>
+              <button 
+                onClick={() => setCalcMode('risk')}
+                style={{ flex: 1, padding: '8px', border: 'none', borderRadius: '4px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', backgroundColor: calcMode === 'risk' ? '#fff' : 'transparent', color: calcMode === 'risk' ? '#1565c0' : '#666', boxShadow: calcMode === 'risk' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none', transition: 'all 0.2s' }}
+              >
+                By Risk %
+              </button>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
@@ -644,7 +694,7 @@ export default function App() {
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#555' }}>Total Position Size ($):</label>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#555' }}>Total Account Capital ($):</label>
                 <input 
                   type="number" 
                   value={calcTotalCapital} 
@@ -654,26 +704,46 @@ export default function App() {
                 />
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#555' }}>Position Allocation (%):</label>
-                <input 
-                  type="number" 
-                  value={calcPositionPct} 
-                  onChange={(e) => setCalcPositionPct(e.target.value)} 
-                  placeholder="e.g. 10"
-                  style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', width: '120px', outline: 'none' }} 
-                />
-              </div>
+              {calcMode === 'position' ? (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#555' }}>Position Allocation (%):</label>
+                  <input 
+                    type="number" 
+                    value={calcPositionPct} 
+                    onChange={(e) => setCalcPositionPct(e.target.value)} 
+                    placeholder="e.g. 10"
+                    style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', width: '120px', outline: 'none' }} 
+                  />
+                </div>
+              ) : (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#d32f2f' }}>Max Risk to Portfolio (%):</label>
+                  <input 
+                    type="number" 
+                    value={calcRiskPct} 
+                    onChange={(e) => setCalcRiskPct(e.target.value)} 
+                    placeholder="e.g. 1.5"
+                    style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', width: '120px', outline: 'none' }} 
+                  />
+                </div>
+              )}
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#555' }}>Stock Entry Price ($):</label>
-                <input 
-                  type="number" 
-                  value={calcEntryPrice} 
-                  onChange={(e) => setCalcEntryPrice(e.target.value)} 
-                  placeholder="0.00"
-                  style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', width: '120px', outline: 'none' }} 
-                />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#555', marginTop: '10px' }}>Stock Entry Price ($):</label>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                  <input 
+                    type="number" 
+                    value={calcEntryPrice} 
+                    onChange={(e) => setCalcEntryPrice(e.target.value)} 
+                    placeholder="0.00"
+                    style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', width: '120px', outline: 'none' }} 
+                  />
+                  {calcHighOfDay && calcLowOfDay && (
+                    <span style={{ fontSize: '11px', color: '#888', marginTop: '4px' }}>
+                      HOD: <b>${calcHighOfDay}</b> | LOD: <b>${calcLowOfDay}</b>
+                    </span>
+                  )}
+                </div>
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -699,7 +769,9 @@ export default function App() {
               
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
                 <span style={{ fontSize: '13px', color: '#555' }}>Capital Allocated:</span>
-                <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#333' }}>${calcCapitalAllocated.toFixed(2)}</span>
+                <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#333' }}>
+                  ${calcCapitalAllocated.toFixed(2)} <span style={{fontSize:'12px', color:'#888', fontWeight:'normal'}}>({calcPositionAllocPct.toFixed(1)}%)</span>
+                </span>
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>

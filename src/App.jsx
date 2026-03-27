@@ -153,7 +153,6 @@ export default function App() {
     const isStandard = uploadFormat === 'Standard';
 
     Papa.parse(file, {
-      // We only use header row binding for Standard CSV format. Brokers have generic grid outputs.
       header: isStandard, 
       skipEmptyLines: true,
       transformHeader: function(h) {
@@ -176,12 +175,19 @@ export default function App() {
             dbTrades = filteredRows.map(row => {
               // Strip dashes from date (e.g. 2026-03-24 -> 20260324)
               const rawDate = row[2].replace(/-/g, '');
-              // Reformat for the DB standard mapping
               const formattedDate = `${rawDate.substring(0, 4)}-${rawDate.substring(4, 6)}-${rawDate.substring(6, 8)}`;
               
+              let ticker = row[6].trim();
+              const currency = row[9] ? row[9].trim() : '';
+              
+              // NEW: If Currency is CAD, append .TO so Yahoo Finance recognizes it as a TSX stock
+              if (currency === 'CAD' && !ticker.includes('.')) {
+                ticker = `${ticker}.TO`;
+              }
+
               return {
                 trade_date: formattedDate,
-                ticker: row[6].trim(),
+                ticker: ticker,
                 action: row[5].toLowerCase().trim(),
                 price: parseFloat(row[8]),
                 // IB lists sells as negative quantities, force them absolute
@@ -227,7 +233,7 @@ export default function App() {
           
           alert("Trades successfully synced!"); 
           fetchTradesFromDB(); 
-          setIsUploadModalOpen(false); // Close Modal on success
+          setIsUploadModalOpen(false);
 
         } catch (error) { 
           console.error("Upload error:", error);
@@ -516,7 +522,6 @@ export default function App() {
             Export Journal
           </button>
 
-          {/* NEW UPLOAD BUTTON */}
           <button onClick={() => setIsUploadModalOpen(true)} style={{ padding: '8px 12px', backgroundColor: '#5c6bc0', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
             Upload Transaction

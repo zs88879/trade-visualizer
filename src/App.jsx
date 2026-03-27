@@ -54,7 +54,12 @@ export default function App() {
   const seriesRef = useRef(null);
   const markersRef = useRef(null); 
 
+  // Modals
   const [isCalcModalOpen, setIsCalcModalOpen] = useState(false);
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [uploadFormat, setUploadFormat] = useState('IB'); // Default to IB
+
+  // Calculator State
   const [calcMode, setCalcMode] = useState('position');
   const [calcTicker, setCalcTicker] = useState('');
   const [calcTotalCapital, setCalcTotalCapital] = useState('');
@@ -143,25 +148,94 @@ export default function App() {
 
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
-    if (file) {
-      Papa.parse(file, {
-        header: true, skipEmptyLines: true,
-        complete: async (results) => {
-          const dbTrades = results.data.map((trade) => {
-            const dateStr = trade.date;
-            const formattedDate = `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}`;
-            return { trade_date: formattedDate, ticker: trade.ticker, action: trade['buy/sell'], price: parseFloat(trade.price), quantity: parseInt(trade.quantity, 10) };
-          });
-          try {
-            const uniqueDates = [...new Set(dbTrades.map(trade => trade.trade_date))];
-            await supabase.from('trades').delete().in('trade_date', uniqueDates);
-            await supabase.from('trades').insert(dbTrades);
-            alert("Trades successfully synced!"); fetchTradesFromDB(); 
-          } catch (error) { alert("Failed to sync database."); }
-            event.target.value = null; 
+    if (!file) return;
+
+    const isStandard = uploadFormat === 'Standard';
+
+    Papa.parse(file, {
+      // We only use header row binding for Standard CSV format. Brokers have generic grid outputs.
+      header: isStandard, 
+      skipEmptyLines: true,
+      transformHeader: function(h) {
+        return isStandard ? h.trim().replace(/^\uFEFF/, '') : h;
+      },
+      complete: async (results) => {
+        try {
+          let dbTrades = [];
+
+          if (uploadFormat === 'IB') {
+            const rows = results.data;
+            // Filter strictly based on criteria: Col A='Transaction History', Col B='Data', Col F=(Buy, Sell), Col G len < 6
+            const filteredRows = rows.filter(row => 
+              row[0] === 'Transaction History' && 
+              row[1] === 'Data' && 
+              (row[5] === 'Buy' || row[5] === 'Sell') && 
+              row[6] && row[6].trim().length < 6
+            );
+
+            dbTrades = filteredRows.map(row => {
+              // Strip dashes from date (e.g. 2026-03-24 -> 20260324)
+              const rawDate = row[2].replace(/-/g, '');
+              // Reformat for the DB standard mapping
+              const formattedDate = `${rawDate.substring(0, 4)}-${rawDate.substring(4, 6)}-${rawDate.substring(6, 8)}`;
+              
+              return {
+                trade_date: formattedDate,
+                ticker: row[6].trim(),
+                action: row[5].toLowerCase().trim(),
+                price: parseFloat(row[8]),
+                // IB lists sells as negative quantities, force them absolute
+                quantity: Math.abs(parseInt(row[7], 10)) 
+              };
+            });
+
+          } else if (uploadFormat === 'Questrade') {
+            alert("Questrade parsing logic coming soon! Please provide a sample file.");
+            setIsUploadModalOpen(false);
+            event.target.value = null;
+            return;
+
+          } else {
+            // Standard Generic Format
+            dbTrades = results.data
+              .filter(trade => trade.date && trade.ticker) 
+              .map((trade) => {
+                const dateStr = String(trade.date).trim();
+                const formattedDate = `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}`;
+                
+                return { 
+                  trade_date: formattedDate, 
+                  ticker: trade.ticker.trim(), 
+                  action: trade['buy/sell'] ? trade['buy/sell'].toLowerCase().trim() : '', 
+                  price: parseFloat(trade.price), 
+                  quantity: Math.abs(parseInt(trade.quantity, 10)) 
+                };
+            });
+          }
+
+          if (dbTrades.length === 0) {
+            alert(`No valid trades found for the ${uploadFormat} format.`);
+            event.target.value = null;
+            return;
+          }
+
+          const uniqueDates = [...new Set(dbTrades.map(trade => trade.trade_date))];
+          await supabase.from('trades').delete().in('trade_date', uniqueDates);
+          
+          const { error } = await supabase.from('trades').insert(dbTrades);
+          if (error) throw error;
+          
+          alert("Trades successfully synced!"); 
+          fetchTradesFromDB(); 
+          setIsUploadModalOpen(false); // Close Modal on success
+
+        } catch (error) { 
+          console.error("Upload error:", error);
+          alert("Failed to process the file. Check your browser console for details."); 
         }
-      });
-    }
+        event.target.value = null; 
+      }
+    });
   };
 
   const handleExportCSV = () => {
@@ -282,7 +356,7 @@ export default function App() {
     if (isAuthenticated && chartContainerRef.current && activeTab === 'chart') {
       const chart = createChart(chartContainerRef.current, {
         width: chartContainerRef.current.clientWidth || 800, 
-        height: 600, // INCREASED CHART HEIGHT TO 600px
+        height: 600,
         layout: { background: { color: '#ffffff' }, textColor: '#333', fontSize: 10 },
         grid: { vertLines: { color: '#eee' }, horzLines: { color: '#eee' } },
       });
@@ -441,6 +515,12 @@ export default function App() {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
             Export Journal
           </button>
+
+          {/* NEW UPLOAD BUTTON */}
+          <button onClick={() => setIsUploadModalOpen(true)} style={{ padding: '8px 12px', backgroundColor: '#5c6bc0', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+            Upload Transaction
+          </button>
           
           <div style={{ borderLeft: '2px solid #ddd', height: '24px' }}></div>
 
@@ -463,11 +543,37 @@ export default function App() {
             <button onClick={() => { setStartDate(''); setEndDate(''); }} style={{ padding: '6px 10px', fontSize: '12px', cursor: 'pointer', backgroundColor: '#e0e0e0', border: 'none', borderRadius: '4px' }}>Clear</button>
           </div>
           <div style={{ borderLeft: '2px solid #ddd', height: '24px' }}></div>
-          <input type="file" accept=".csv" onChange={handleFileUpload} />
           <button onClick={() => setIsAuthenticated(false)} style={{ padding: '6px 12px', backgroundColor: '#f44336', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>Lock</button>
         </div>
       </div>
 
+      {/* UPLOAD MODAL */}
+      {isUploadModalOpen && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ backgroundColor: '#fff', padding: '25px', borderRadius: '8px', width: '380px', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '2px solid #eee', paddingBottom: '10px' }}>
+              <h3 style={{ margin: 0, color: '#333' }}>Upload Transactions</h3>
+              <button onClick={() => setIsUploadModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#888' }}>&times;</button>
+            </div>
+            
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 'bold', color: '#555', marginBottom: '8px' }}>Select Broker Format:</label>
+              <select value={uploadFormat} onChange={(e) => setUploadFormat(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ccc', outline: 'none', fontSize: '14px', cursor: 'pointer' }}>
+                <option value="Standard">Standard Format (Generic CSV)</option>
+                <option value="IB">Interactive Brokers</option>
+                <option value="Questrade">Questrade</option>
+              </select>
+            </div>
+            
+            <div style={{ marginBottom: '10px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 'bold', color: '#555', marginBottom: '8px' }}>Choose CSV File:</label>
+              <input type="file" accept=".csv" onChange={handleFileUpload} style={{ width: '100%', padding: '10px', border: '1px dashed #ccc', borderRadius: '4px', cursor: 'pointer' }} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CALCULATOR MODAL */}
       {isCalcModalOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
           <div style={{ backgroundColor: '#fff', padding: '25px', borderRadius: '8px', width: '420px', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }}>
@@ -658,7 +764,7 @@ export default function App() {
           {statsArray.length > 0 && (
             <div style={{ display: 'flex', gap: '15px', marginBottom: '20px', flexWrap: 'wrap' }}>
               
-              {/* Row 1: Core Stats (COMPACT FONT/PADDING) */}
+              {/* Row 1: Core Stats */}
               <div title="Gross Profit divided by Gross Loss across all closed trades." style={{ flex: 1, minWidth: '120px', padding: '12px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
                 <div style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Profit Factor</div>
                 <div style={{ fontSize: '20px', fontWeight: 'bold', color: profitFactor > 1 || profitFactor === 'MAX' ? '#2e7d32' : '#d32f2f' }}>{profitFactor}</div>
@@ -728,10 +834,9 @@ export default function App() {
           {/* ========================================= */}
           <div style={{ display: activeTab === 'chart' ? 'block' : 'none' }}>
             <h3 style={{ marginTop: 0 }}>{selectedTicker ? `${selectedTicker} Daily Chart` : 'Select a trade to view the chart'}</h3>
-            {/* INCREASED CHART CONTAINER HEIGHT */}
             <div ref={chartContainerRef} style={{ flex: 1, width: '100%', minHeight: '600px', border: '1px solid #ddd', borderRadius: '4px' }} />
 
-            {/* OPEN Position Analytics with NOTES (COMPACT FONT/PADDING) */}
+            {/* OPEN Position Analytics with NOTES */}
             {selectedTicker && Object.values(tickerStats)
               .filter(stat => stat.ticker === selectedTicker && stat.qty > 0)
               .map((stat) => {
@@ -781,7 +886,7 @@ export default function App() {
               })
             }
 
-            {/* CLOSED Position Analytics with NOTES (COMPACT FONT/PADDING) */}
+            {/* CLOSED Position Analytics with NOTES */}
             {selectedTicker && Object.values(tickerStats)
               .filter(stat => stat.ticker === selectedTicker && stat.qty === 0)
               .map((stat) => {

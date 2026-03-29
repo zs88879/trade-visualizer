@@ -18,47 +18,64 @@ const CYCLE_COLORS = [
   { bg: '#e0f7fa', border: '#0097a7' }, 
 ];
 
-// --- Technical Analysis Helper Functions ---
-function calculateSMA(data, period) {
-  if (data.length < period) return null;
-  const slice = data.slice(-period);
-  return slice.reduce((a, b) => a + b, 0) / period;
-}
+// --- NEW: Operational News Filter & Outlook Analysis ---
+const FINANCIAL_JARGON = [
+  'stock', 'share', 'price target', 'buy', 'sell', 'hold', 'rating', 'analyst', 
+  'downgrade', 'upgrade', 'wall street', 'dividend', 'investor', 'bull', 'bear', 
+  'nasdaq', 'nyse', 'chart', 'trade', 'technical', 'outperform', 'underperform', 
+  'yield', 'earnings estimate', 'zacks', 'motley fool', 'price objective', 'equities'
+];
 
-function calculateRSI(data, period) {
-  if (data.length <= period) return null;
-  let gains = 0, losses = 0;
-  for (let i = data.length - period; i < data.length; i++) {
-    const diff = data[i] - data[i - 1];
-    if (diff >= 0) gains += diff;
-    else losses -= diff;
-  }
-  const avgGain = gains / period;
-  const avgLoss = losses / period;
-  if (avgLoss === 0) return 100;
-  const rs = avgGain / avgLoss;
-  return 100 - (100 / (1 + rs));
-}
-
-// --- Headline Sentiment Analyzer ---
-function analyzeSentiment(headlines) {
-  if (!headlines || headlines.length === 0) return { label: 'Neutral', color: '#555' };
-  
-  const positiveWords = ['surge', 'jump', 'up', 'bull', 'beat', 'upgrade', 'higher', 'growth', 'gain', 'buy', 'strong', 'outperform', 'soar', 'record'];
-  const negativeWords = ['plunge', 'drop', 'down', 'bear', 'miss', 'downgrade', 'lower', 'loss', 'sell', 'weak', 'underperform', 'cut', 'fall', 'sink'];
-  
-  let score = 0;
-  headlines.forEach(headline => {
-    const text = headline.toLowerCase();
-    positiveWords.forEach(w => { if (text.includes(w)) score++; });
-    negativeWords.forEach(w => { if (text.includes(w)) score--; });
+function filterOperationalNews(newsItems) {
+  return newsItems.filter(item => {
+    const text = (item.title + " " + (item.description || "")).toLowerCase();
+    // Exclude the article entirely if it contains ANY Wall Street/Stock Performance jargon
+    const hasFinancialJargon = FINANCIAL_JARGON.some(term => text.includes(term));
+    return !hasFinancialJargon;
   });
+}
 
-  if (score >= 2) return { label: 'Bullish', color: '#2e7d32' };
-  if (score <= -2) return { label: 'Bearish', color: '#c62828' };
-  if (score === 1) return { label: 'Slightly Bullish', color: '#4caf50' };
-  if (score === -1) return { label: 'Slightly Bearish', color: '#ef5350' };
-  return { label: 'Neutral', color: '#555' };
+function generateOutlookAnalysis(ticker, newsItems) {
+  if (!newsItems || newsItems.length === 0) {
+    return `We couldn't find recent operational or product-specific news for ${ticker}. The current news cycle appears to be dominated by financial performance reporting or market speculation, which our engine has intentionally filtered out to give you a clear view of business operations.`;
+  }
+
+  let analysis = `Based on recent operational news, ${ticker}'s near-term fundamental outlook is driven by several key developments. `;
+  
+  const textCorpus = newsItems.map(n => n.title.toLowerCase()).join(" ");
+  
+  let themes = [];
+  if (textCorpus.includes('launch') || textCorpus.includes('release') || textCorpus.includes('new product') || textCorpus.includes('announce')) {
+    themes.push("rolling out new products and services");
+  }
+  if (textCorpus.includes('partner') || textCorpus.includes('collaborat') || textCorpus.includes('deal') || textCorpus.includes('pact') || textCorpus.includes('join forces')) {
+    themes.push("forging strategic partnerships");
+  }
+  if (textCorpus.includes('acquir') || textCorpus.includes('buyout') || textCorpus.includes('merger')) {
+    themes.push("expanding through M&A activity");
+  }
+  if (textCorpus.includes('sue') || textCorpus.includes('lawsuit') || textCorpus.includes('court') || textCorpus.includes('probe') || textCorpus.includes('investigat')) {
+    themes.push("navigating active legal or regulatory challenges");
+  }
+  if (textCorpus.includes('layoff') || textCorpus.includes('cut') || textCorpus.includes('restructur') || textCorpus.includes('resign') || textCorpus.includes('ceo')) {
+    themes.push("undergoing internal restructuring or leadership changes");
+  }
+  if (textCorpus.includes('compet') || textCorpus.includes('rival') || textCorpus.includes('vs')) {
+    themes.push("facing active shifts in its competitive landscape");
+  }
+  if (textCorpus.includes('patent') || textCorpus.includes('trial') || textCorpus.includes('fda') || textCorpus.includes('r&d')) {
+    themes.push("advancing key R&D initiatives");
+  }
+
+  if (themes.length > 0) {
+    analysis += `The company's management is currently focused on ${themes.join(", and ")}. `;
+  } else {
+    analysis += `The company is maintaining its core operational trajectory without major structural shifts in the recent news cycle. `;
+  }
+
+  analysis += `Overall, the focus remains firmly on executing fundamental business operations and product roadmap delivery rather than immediate market fluctuations.`;
+
+  return analysis;
 }
 // ------------------------------------------------
 
@@ -76,10 +93,6 @@ export default function App() {
   const [monthlyStats, setMonthlyStats] = useState({}); 
   const [showClosedPositions, setShowClosedPositions] = useState(true);
   
-  const [technicalOutlook, setTechnicalOutlook] = useState(null);
-  
-  const [newsData, setNewsData] = useState({ ticker: [], market: [], sentiment: null, isLoading: false, hasError: false });
-
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
@@ -101,10 +114,18 @@ export default function App() {
   const seriesRef = useRef(null);
   const markersRef = useRef(null); 
 
+  // Modals
   const [isCalcModalOpen, setIsCalcModalOpen] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [uploadFormat, setUploadFormat] = useState('IB'); 
+  
+  // NEW: Outlook Modal State
+  const [isOutlookModalOpen, setIsOutlookModalOpen] = useState(false);
+  const [outlookTicker, setOutlookTicker] = useState('');
+  const [outlookIsFetching, setOutlookIsFetching] = useState(false);
+  const [outlookResults, setOutlookResults] = useState(null); 
 
+  // Calculator State
   const [calcMode, setCalcMode] = useState('position');
   const [calcTicker, setCalcTicker] = useState('');
   const [calcTotalCapital, setCalcTotalCapital] = useState('');
@@ -301,6 +322,55 @@ export default function App() {
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
+  // NEW: Fetch Outlook Data
+  const handleFetchOutlook = async () => {
+    if (!outlookTicker) return;
+    setOutlookIsFetching(true);
+    setOutlookResults(null);
+    try {
+      const tkr = outlookTicker.toUpperCase().trim();
+      
+      // Google News Query: Target product, launch, partner, operations, competitor. 
+      // Explicitly ask Google to exclude stock, target, rating, analyst, downgrade
+      const query = `${tkr} AND (product OR launch OR partner OR competitor OR operations) -stock -target -rating -analyst -downgrade`;
+      const rssUrl = encodeURIComponent(`https://news.google.com/rss/search?q=${query}&hl=en-US&gl=US&ceid=US:en`);
+      const url = `https://api.rss2json.com/v1/api.json?rss_url=${rssUrl}`;
+      
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Failed to fetch news");
+      const data = await res.json();
+      
+      let items = data.items || [];
+      
+      // Step 2: Apply strictly local filter to nuke any Wall Street jargon articles that slipped through
+      items = filterOperationalNews(items);
+      
+      // Step 3: Deduplicate identical stories from different publishers
+      const uniqueItems = [];
+      const seenTitles = new Set();
+      for (let item of items) {
+          const shortTitle = item.title.substring(0, 30).toLowerCase();
+          if (!seenTitles.has(shortTitle)) {
+            seenTitles.add(shortTitle);
+            uniqueItems.push(item);
+          }
+      }
+
+      const finalNews = uniqueItems.slice(0, 10); 
+      const analysis = generateOutlookAnalysis(tkr, finalNews);
+
+      setOutlookResults({
+        news: finalNews,
+        analysis: analysis
+      });
+
+    } catch(err) {
+      console.error(err);
+      setOutlookResults({ error: true });
+    }
+    setOutlookIsFetching(false);
+  };
+
   useEffect(() => {
     if (trades.length === 0) {
       setTickerStats({}); setDayOfWeekStats({}); setMonthlyStats({}); setAnalyzedTrades([]); 
@@ -414,7 +484,6 @@ export default function App() {
   useEffect(() => {
     if (!selectedTicker || activeTab !== 'chart') return;
     
-    // 1. Fetch Price Chart Data
     const fetchMarketData = async () => {
       if (!seriesRef.current) return;
       const tickerTrades = analyzedTrades.filter((t) => t.ticker === selectedTicker);
@@ -438,26 +507,6 @@ export default function App() {
           }
           realHistoricalData.sort((a, b) => new Date(a.time) - new Date(b.time)); 
           seriesRef.current.setData(realHistoricalData);
-
-          const closesArray = realHistoricalData.map(d => d.close);
-          if (closesArray.length > 50) {
-            const currentPrice = closesArray[closesArray.length - 1];
-            const sma20 = calculateSMA(closesArray, 20);
-            const sma50 = calculateSMA(closesArray, 50);
-            const rsi14 = calculateRSI(closesArray, 14);
-
-            let trend = 'Neutral'; let trendColor = '#555';
-            if (currentPrice > sma20 && sma20 > sma50) { trend = 'Strong Bullish'; trendColor = '#2e7d32'; }
-            else if (currentPrice < sma20 && sma20 < sma50) { trend = 'Strong Bearish'; trendColor = '#c62828'; }
-            else if (currentPrice > sma20) { trend = 'Slightly Bullish'; trendColor = '#4caf50'; }
-            else if (currentPrice < sma20) { trend = 'Slightly Bearish'; trendColor = '#ef5350'; }
-
-            let rsiStatus = 'Neutral'; let rsiColor = '#555';
-            if (rsi14 >= 70) { rsiStatus = 'Overbought'; rsiColor = '#c62828'; }
-            else if (rsi14 <= 30) { rsiStatus = 'Oversold'; rsiColor = '#2e7d32'; }
-
-            setTechnicalOutlook({ sma20, sma50, rsi14, trend, trendColor, rsiStatus, rsiColor });
-          } else { setTechnicalOutlook(null); }
         }
         
         const markers = tickerTrades.map((trade) => {
@@ -469,52 +518,7 @@ export default function App() {
       } catch (error) {}
     };
 
-    // 2. Fetch News Context (NEW GOOGLE NEWS ENGINE)
-    const fetchNewsData = async () => {
-      try {
-        setNewsData({ ticker: [], market: [], sentiment: null, isLoading: true, hasError: false }); 
-
-        const tickerBaseTkr = selectedTicker.replace('.TO', ''); 
-        
-        // Use rss2json to safely parse the Google News RSS feeds (Bypasses Yahoo Proxy Blocks!)
-        const tRssUrl = encodeURIComponent(`https://news.google.com/rss/search?q=${tickerBaseTkr}+stock&hl=en-US&gl=US&ceid=US:en`);
-        const tUrl = `https://api.rss2json.com/v1/api.json?rss_url=${tRssUrl}`;
-        
-        const tRes = await fetch(tUrl); 
-        if (!tRes.ok) throw new Error("Ticker news failed");
-        const tData = await tRes.json();
-        
-        const tickerNews = tData.items ? tData.items.map(item => ({
-            title: item.title,
-            link: item.link,
-            // Google News titles usually end with ' - Publisher Name'
-            publisher: item.title.includes(' - ') ? item.title.split(' - ').pop() : 'News'
-        })) : [];
-
-        const mRssUrl = encodeURIComponent(`https://news.google.com/rss/search?q=SP500+stock+market+economy&hl=en-US&gl=US&ceid=US:en`);
-        const mUrl = `https://api.rss2json.com/v1/api.json?rss_url=${mRssUrl}`;
-        
-        const mRes = await fetch(mUrl); 
-        if (!mRes.ok) throw new Error("Market news failed");
-        const mData = await mRes.json();
-        
-        const marketNews = mData.items ? mData.items.map(item => ({
-            title: item.title,
-            link: item.link
-        })) : [];
-
-        const allHeadlines = tickerNews.map(n => n.title);
-        const sentiment = analyzeSentiment(allHeadlines);
-
-        setNewsData({ ticker: tickerNews, market: marketNews, sentiment, isLoading: false, hasError: false });
-      } catch (error) { 
-        console.error("Error fetching news:", error); 
-        setNewsData(prev => ({ ...prev, isLoading: false, hasError: true }));
-      }
-    };
-
     fetchMarketData();
-    fetchNewsData();
   }, [selectedTicker, analyzedTrades, activeTab]);
 
   const handleCalcTickerBlur = async () => {
@@ -631,6 +635,12 @@ export default function App() {
             Calculator
           </button>
 
+          {/* NEW COMPANY OUTLOOK BUTTON */}
+          <button onClick={() => setIsOutlookModalOpen(true)} style={{ padding: '8px 12px', backgroundColor: '#f57c00', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            Company Outlook
+          </button>
+
           <button onClick={handleExportCSV} style={{ padding: '8px 12px', backgroundColor: '#1565c0', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
             Export Journal
@@ -665,6 +675,64 @@ export default function App() {
           <button onClick={() => setIsAuthenticated(false)} style={{ padding: '6px 12px', backgroundColor: '#f44336', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>Lock</button>
         </div>
       </div>
+
+      {/* OUTLOOK MODAL */}
+      {isOutlookModalOpen && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ backgroundColor: '#fff', padding: '25px', borderRadius: '8px', width: '600px', maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }}>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '2px solid #eee', paddingBottom: '10px' }}>
+              <h3 style={{ margin: 0, color: '#333' }}>Company Operations & Outlook</h3>
+              <button onClick={() => setIsOutlookModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#888' }}>&times;</button>
+            </div>
+            
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+              <input type="text" value={outlookTicker} onChange={(e) => setOutlookTicker(e.target.value.toUpperCase())} placeholder="Enter Stock Ticker (e.g. AAPL)" style={{ flex: 1, padding: '10px', border: '1px solid #ccc', borderRadius: '4px', outline: 'none', fontSize: '14px', textTransform: 'uppercase' }} />
+              <button onClick={handleFetchOutlook} disabled={outlookIsFetching} style={{ padding: '10px 20px', backgroundColor: '#f57c00', color: 'white', border: 'none', borderRadius: '4px', cursor: outlookIsFetching ? 'not-allowed' : 'pointer', fontWeight: 'bold' }}>
+                {outlookIsFetching ? 'Scanning...' : 'Analyze'}
+              </button>
+            </div>
+
+            <div style={{ overflowY: 'auto', flex: 1, paddingRight: '5px' }}>
+              {outlookResults?.error && (
+                <p style={{ color: '#d32f2f', fontWeight: 'bold' }}>Failed to pull news data. Please try again.</p>
+              )}
+
+              {outlookResults?.analysis && (
+                <div style={{ backgroundColor: '#e3f2fd', padding: '15px', borderRadius: '6px', border: '1px solid #90caf9', marginBottom: '20px' }}>
+                  <h4 style={{ margin: '0 0 10px 0', color: '#1565c0', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+                    Synthesized Outlook Analysis
+                  </h4>
+                  <p style={{ margin: 0, fontSize: '14px', lineHeight: '1.5', color: '#333' }}>{outlookResults.analysis}</p>
+                </div>
+              )}
+
+              {outlookResults?.news && (
+                <div>
+                  <h4 style={{ margin: '0 0 10px 0', color: '#555' }}>Filtered Operational Headlines</h4>
+                  <p style={{ fontSize: '12px', color: '#888', marginTop: '-5px', marginBottom: '15px' }}>Strictly filtering out stock prices, analyst ratings, and wall street jargon.</p>
+                  
+                  {outlookResults.news.length === 0 ? (
+                    <p style={{ fontSize: '13px', color: '#666' }}>No strictly operational news found recently.</p>
+                  ) : (
+                    <ul style={{ margin: 0, paddingLeft: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      {outlookResults.news.map((item, idx) => (
+                        <li key={idx} style={{ fontSize: '13px', color: '#444', lineHeight: '1.4' }}>
+                          <a href={item.link} target="_blank" rel="noreferrer" style={{ color: '#1565c0', textDecoration: 'none', fontWeight: '500' }}>
+                            {item.title.split(' - ').slice(0, -1).join(' - ') || item.title}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
+            
+          </div>
+        </div>
+      )}
 
       {/* UPLOAD MODAL */}
       {isUploadModalOpen && (
@@ -955,69 +1023,6 @@ export default function App() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
               <h3 style={{ margin: 0 }}>{selectedTicker ? `${selectedTicker} Daily Chart` : 'Select a trade to view the chart'}</h3>
             </div>
-
-            {/* TECHNICAL & NEWS OUTLOOK DASHBOARD */}
-            {technicalOutlook && selectedTicker && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', marginBottom: '15px', backgroundColor: '#f0f4f8', padding: '15px', borderRadius: '6px', border: '1px solid #d9e2ec' }}>
-                
-                {/* Top Row: Tech Analysis & Sentiment Score */}
-                <div style={{ display: 'flex', gap: '20px', alignItems: 'center', flexWrap: 'wrap', borderBottom: '1px solid #d9e2ec', paddingBottom: '12px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#627d98', textTransform: 'uppercase' }}>Near-Term Trend:</span>
-                    <span style={{ fontSize: '13px', fontWeight: 'bold', color: technicalOutlook.trendColor, padding: '4px 8px', backgroundColor: '#fff', borderRadius: '4px', border: `1px solid ${technicalOutlook.trendColor}` }}>{technicalOutlook.trend}</span>
-                  </div>
-                  <div style={{ borderLeft: '1px solid #bcccdc', height: '20px' }}></div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#627d98', textTransform: 'uppercase' }}>RSI (14):</span>
-                    <span style={{ fontSize: '14px', fontWeight: 'bold', color: technicalOutlook.rsiColor }}>{technicalOutlook.rsi14.toFixed(1)} <span style={{fontSize:'12px', fontWeight:'normal'}}>({technicalOutlook.rsiStatus})</span></span>
-                  </div>
-                  <div style={{ borderLeft: '1px solid #bcccdc', height: '20px' }}></div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#627d98', textTransform: 'uppercase' }}>SMA 20/50:</span>
-                    <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#334e68' }}>${technicalOutlook.sma20.toFixed(2)} / ${technicalOutlook.sma50.toFixed(2)}</span>
-                  </div>
-                  
-                  {newsData.sentiment && (
-                    <>
-                      <div style={{ borderLeft: '1px solid #bcccdc', height: '20px' }}></div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#627d98', textTransform: 'uppercase' }}>Headline Sentiment:</span>
-                        <span style={{ fontSize: '13px', fontWeight: 'bold', color: newsData.sentiment.color, padding: '4px 8px', backgroundColor: '#fff', borderRadius: '4px', border: `1px solid ${newsData.sentiment.color}` }}>{newsData.sentiment.label}</span>
-                      </div>
-                    </>
-                  )}
-                </div>
-
-                {/* Bottom Row: News Headlines with Load/Error Handling */}
-                <div style={{ display: 'flex', gap: '20px' }}>
-                  <div style={{ flex: 1 }}>
-                    <h5 style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#334e68' }}>📰 Recent {selectedTicker} News</h5>
-                    <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '12px', color: '#486581' }}>
-                      {newsData.isLoading ? ( <li>Fetching recent news...</li> ) : 
-                       newsData.hasError ? ( <li style={{color: '#d32f2f'}}>Failed to load news. Check internet connection.</li> ) : 
-                       newsData.ticker.length > 0 ? (
-                        newsData.ticker.slice(0, 3).map((item, i) => (
-                          <li key={i} style={{ marginBottom: '4px' }}><a href={item.link} target="_blank" rel="noreferrer" style={{ color: '#1565c0', textDecoration: 'none' }}>{item.title.split(' - ').slice(0, -1).join(' - ') || item.title}</a> <span style={{ color: '#9fb3c8' }}>({item.publisher})</span></li>
-                        ))
-                      ) : ( <li>No recent news found.</li> )}
-                    </ul>
-                  </div>
-                  <div style={{ flex: 1, borderLeft: '1px solid #d9e2ec', paddingLeft: '20px' }}>
-                    <h5 style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#334e68' }}>🌎 Macro Context (SPY/S&P 500)</h5>
-                    <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '12px', color: '#486581' }}>
-                      {newsData.isLoading ? ( <li>Fetching market condition...</li> ) : 
-                       newsData.hasError ? ( <li style={{color: '#d32f2f'}}>Failed to load market data. Check internet connection.</li> ) : 
-                       newsData.market.length > 0 ? (
-                        newsData.market.slice(0, 3).map((item, i) => (
-                          <li key={i} style={{ marginBottom: '4px' }}><a href={item.link} target="_blank" rel="noreferrer" style={{ color: '#1565c0', textDecoration: 'none' }}>{item.title.split(' - ').slice(0, -1).join(' - ') || item.title}</a></li>
-                        ))
-                      ) : ( <li>No market data found.</li> )}
-                    </ul>
-                  </div>
-                </div>
-
-              </div>
-            )}
 
             <div ref={chartContainerRef} style={{ flex: 1, width: '100%', minHeight: '600px', border: '1px solid #ddd', borderRadius: '4px' }} />
 

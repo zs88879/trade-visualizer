@@ -18,7 +18,50 @@ const CYCLE_COLORS = [
   { bg: '#e0f7fa', border: '#0097a7' }, 
 ];
 
-// --- NEW: Operational News Filter & Outlook Analysis ---
+// --- Technical Analysis Helper Functions ---
+function calculateSMA(data, period) {
+  if (data.length < period) return null;
+  const slice = data.slice(-period);
+  return slice.reduce((a, b) => a + b, 0) / period;
+}
+
+function calculateRSI(data, period) {
+  if (data.length <= period) return null;
+  let gains = 0, losses = 0;
+  for (let i = data.length - period; i < data.length; i++) {
+    const diff = data[i] - data[i - 1];
+    if (diff >= 0) gains += diff;
+    else losses -= diff;
+  }
+  const avgGain = gains / period;
+  const avgLoss = losses / period;
+  if (avgLoss === 0) return 100;
+  const rs = avgGain / avgLoss;
+  return 100 - (100 / (1 + rs));
+}
+
+// --- Headline Sentiment Analyzer ---
+function analyzeSentiment(headlines) {
+  if (!headlines || headlines.length === 0) return { label: 'Neutral', color: '#555' };
+  
+  const positiveWords = ['surge', 'jump', 'up', 'bull', 'beat', 'upgrade', 'higher', 'growth', 'gain', 'buy', 'strong', 'outperform', 'soar', 'record'];
+  const negativeWords = ['plunge', 'drop', 'down', 'bear', 'miss', 'downgrade', 'lower', 'loss', 'sell', 'weak', 'underperform', 'cut', 'fall', 'sink'];
+  
+  let score = 0;
+  headlines.forEach(headline => {
+    const text = headline.toLowerCase();
+    positiveWords.forEach(w => { if (text.includes(w)) score++; });
+    negativeWords.forEach(w => { if (text.includes(w)) score--; });
+  });
+
+  if (score >= 2) return { label: 'Bullish', color: '#2e7d32' };
+  if (score <= -2) return { label: 'Bearish', color: '#c62828' };
+  if (score === 1) return { label: 'Slightly Bullish', color: '#4caf50' };
+  if (score === -1) return { label: 'Slightly Bearish', color: '#ef5350' };
+  return { label: 'Neutral', color: '#555' };
+}
+
+// --- Operational News Filter & Outlook Analysis ---
 const FINANCIAL_JARGON = [
   'stock', 'share', 'price target', 'buy', 'sell', 'hold', 'rating', 'analyst', 
   'downgrade', 'upgrade', 'wall street', 'dividend', 'investor', 'bull', 'bear', 
@@ -29,7 +72,6 @@ const FINANCIAL_JARGON = [
 function filterOperationalNews(newsItems) {
   return newsItems.filter(item => {
     const text = (item.title + " " + (item.description || "")).toLowerCase();
-    // Exclude the article entirely if it contains ANY Wall Street/Stock Performance jargon
     const hasFinancialJargon = FINANCIAL_JARGON.some(term => text.includes(term));
     return !hasFinancialJargon;
   });
@@ -93,6 +135,9 @@ export default function App() {
   const [monthlyStats, setMonthlyStats] = useState({}); 
   const [showClosedPositions, setShowClosedPositions] = useState(true);
   
+  const [technicalOutlook, setTechnicalOutlook] = useState(null);
+  const [newsData, setNewsData] = useState({ ticker: [], market: [], sentiment: null, isLoading: false, hasError: false });
+
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
@@ -114,18 +159,15 @@ export default function App() {
   const seriesRef = useRef(null);
   const markersRef = useRef(null); 
 
-  // Modals
   const [isCalcModalOpen, setIsCalcModalOpen] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [uploadFormat, setUploadFormat] = useState('IB'); 
   
-  // NEW: Outlook Modal State
   const [isOutlookModalOpen, setIsOutlookModalOpen] = useState(false);
   const [outlookTicker, setOutlookTicker] = useState('');
   const [outlookIsFetching, setOutlookIsFetching] = useState(false);
   const [outlookResults, setOutlookResults] = useState(null); 
 
-  // Calculator State
   const [calcMode, setCalcMode] = useState('position');
   const [calcTicker, setCalcTicker] = useState('');
   const [calcTotalCapital, setCalcTotalCapital] = useState('');
@@ -322,7 +364,7 @@ export default function App() {
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
-  // NEW: Fetch Outlook Data
+  // --- NEW: Robust Native XML Parsing ---
   const handleFetchOutlook = async () => {
     if (!outlookTicker) return;
     setOutlookIsFetching(true);
@@ -330,22 +372,32 @@ export default function App() {
     try {
       const tkr = outlookTicker.toUpperCase().trim();
       
-      // Google News Query: Target product, launch, partner, operations, competitor. 
-      // Explicitly ask Google to exclude stock, target, rating, analyst, downgrade
-      const query = `${tkr} AND (product OR launch OR partner OR competitor OR operations) -stock -target -rating -analyst -downgrade`;
-      const rssUrl = encodeURIComponent(`https://news.google.com/rss/search?q=${query}&hl=en-US&gl=US&ceid=US:en`);
-      const url = `https://api.rss2json.com/v1/api.json?rss_url=${rssUrl}`;
+      // Request simple RSS search from Google
+      const query = `${tkr} AND (product OR launch OR partner OR competitor OR operations)`;
+      const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`;
+      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(rssUrl)}`;
       
-      const res = await fetch(url);
+      // Fetch Raw XML
+      const res = await fetch(proxyUrl);
       if (!res.ok) throw new Error("Failed to fetch news");
-      const data = await res.json();
+      const xmlText = await res.text();
       
-      let items = data.items || [];
+      // Parse XML Natively in Browser
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(xmlText, "text/xml");
+      const itemNodes = xmlDoc.querySelectorAll("item");
       
-      // Step 2: Apply strictly local filter to nuke any Wall Street jargon articles that slipped through
+      let items = Array.from(itemNodes).map(node => ({
+        title: node.querySelector("title")?.textContent || "",
+        link: node.querySelector("link")?.textContent || "",
+        description: node.querySelector("description")?.textContent || "",
+        publisher: node.querySelector("source")?.textContent || "News"
+      }));
+      
+      // Step 2: Apply strictly local filter
       items = filterOperationalNews(items);
       
-      // Step 3: Deduplicate identical stories from different publishers
+      // Step 3: Deduplicate
       const uniqueItems = [];
       const seenTitles = new Set();
       for (let item of items) {
@@ -635,7 +687,7 @@ export default function App() {
             Calculator
           </button>
 
-          {/* NEW COMPANY OUTLOOK BUTTON */}
+          {/* COMPANY OUTLOOK BUTTON */}
           <button onClick={() => setIsOutlookModalOpen(true)} style={{ padding: '8px 12px', backgroundColor: '#f57c00', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
             Company Outlook
@@ -695,7 +747,7 @@ export default function App() {
 
             <div style={{ overflowY: 'auto', flex: 1, paddingRight: '5px' }}>
               {outlookResults?.error && (
-                <p style={{ color: '#d32f2f', fontWeight: 'bold' }}>Failed to pull news data. Please try again.</p>
+                <p style={{ color: '#d32f2f', fontWeight: 'bold', padding: '10px', backgroundColor: '#ffebee', borderRadius: '4px' }}>Failed to pull news data. Please check your internet connection and try again.</p>
               )}
 
               {outlookResults?.analysis && (

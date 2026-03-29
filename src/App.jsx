@@ -40,8 +40,10 @@ function calculateRSI(data, period) {
   return 100 - (100 / (1 + rs));
 }
 
-// --- NEW: Headline Sentiment Analyzer ---
+// --- Headline Sentiment Analyzer ---
 function analyzeSentiment(headlines) {
+  if (!headlines || headlines.length === 0) return { label: 'Neutral', color: '#555' };
+  
   const positiveWords = ['surge', 'jump', 'up', 'bull', 'beat', 'upgrade', 'higher', 'growth', 'gain', 'buy', 'strong', 'outperform', 'soar', 'record'];
   const negativeWords = ['plunge', 'drop', 'down', 'bear', 'miss', 'downgrade', 'lower', 'loss', 'sell', 'weak', 'underperform', 'cut', 'fall', 'sink'];
   
@@ -76,8 +78,8 @@ export default function App() {
   
   const [technicalOutlook, setTechnicalOutlook] = useState(null);
   
-  // NEW: State to hold the live news data
-  const [newsData, setNewsData] = useState({ ticker: [], market: [], sentiment: null });
+  // NEW: Added loading and error states to properly manage the UI
+  const [newsData, setNewsData] = useState({ ticker: [], market: [], sentiment: null, isLoading: false, hasError: false });
 
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -410,7 +412,6 @@ export default function App() {
     }
   }, [isAuthenticated, activeTab]);
 
-  // --- NEW: Master Data Fetching (Chart Data + News Data) ---
   useEffect(() => {
     if (!selectedTicker || activeTab !== 'chart') return;
     
@@ -469,28 +470,35 @@ export default function App() {
       } catch (error) {}
     };
 
-    // 2. NEW: Fetch News Context
+    // 2. Fetch News Context (UPDATED WITH BETTER PROXY AND ERROR HANDLING)
     const fetchNewsData = async () => {
       try {
-        setNewsData({ ticker: [], market: [], sentiment: null }); // reset while loading
+        setNewsData({ ticker: [], market: [], sentiment: null, isLoading: true, hasError: false }); 
 
-        // Fetch Ticker Specific News (Yahoo Search API)
-        const tickerBaseTkr = selectedTicker.replace('.TO', ''); // Help the search engine
-        const tUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://query2.finance.yahoo.com/v1/finance/search?q=${tickerBaseTkr}&quotesCount=0&newsCount=5`)}`;
-        const tRes = await fetch(tUrl); const tData = await tRes.json();
+        const tickerBaseTkr = selectedTicker.replace('.TO', ''); 
+        // Using corsproxy.io as it is often more stable for search endpoints
+        const tUrl = `https://corsproxy.io/?${encodeURIComponent(`https://query2.finance.yahoo.com/v1/finance/search?q=${tickerBaseTkr}&quotesCount=0&newsCount=5`)}`;
+        
+        const tRes = await fetch(tUrl); 
+        if (!tRes.ok) throw new Error("Ticker news failed");
+        const tData = await tRes.json();
         const tickerNews = tData.news || [];
 
-        // Fetch Macro Market News (using SPY as a proxy for market condition)
-        const mUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://query2.finance.yahoo.com/v1/finance/search?q=SPY&quotesCount=0&newsCount=3`)}`;
-        const mRes = await fetch(mUrl); const mData = await mRes.json();
+        const mUrl = `https://corsproxy.io/?${encodeURIComponent(`https://query2.finance.yahoo.com/v1/finance/search?q=SPY&quotesCount=0&newsCount=3`)}`;
+        const mRes = await fetch(mUrl); 
+        if (!mRes.ok) throw new Error("Market news failed");
+        const mData = await mRes.json();
         const marketNews = mData.news || [];
 
-        // Run the algorithmic sentiment check on the headlines
         const allHeadlines = tickerNews.map(n => n.title);
         const sentiment = analyzeSentiment(allHeadlines);
 
-        setNewsData({ ticker: tickerNews, market: marketNews, sentiment });
-      } catch (error) { console.error("Error fetching news:", error); }
+        setNewsData({ ticker: tickerNews, market: marketNews, sentiment, isLoading: false, hasError: false });
+      } catch (error) { 
+        console.error("Error fetching news:", error); 
+        // Tell the UI that the fetch failed so it stops spinning
+        setNewsData(prev => ({ ...prev, isLoading: false, hasError: true }));
+      }
     };
 
     fetchMarketData();
@@ -968,22 +976,30 @@ export default function App() {
                   )}
                 </div>
 
-                {/* Bottom Row: News Headlines */}
+                {/* Bottom Row: News Headlines with Load/Error Handling */}
                 <div style={{ display: 'flex', gap: '20px' }}>
                   <div style={{ flex: 1 }}>
                     <h5 style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#334e68' }}>📰 Recent {selectedTicker} News</h5>
                     <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '12px', color: '#486581' }}>
-                      {newsData.ticker.length > 0 ? newsData.ticker.slice(0, 3).map((item, i) => (
-                        <li key={i} style={{ marginBottom: '4px' }}><a href={item.link} target="_blank" rel="noreferrer" style={{ color: '#1565c0', textDecoration: 'none' }}>{item.title}</a> <span style={{ color: '#9fb3c8' }}>({item.publisher})</span></li>
-                      )) : <li>Fetching recent news...</li>}
+                      {newsData.isLoading ? ( <li>Fetching recent news...</li> ) : 
+                       newsData.hasError ? ( <li style={{color: '#d32f2f'}}>Failed to load news (proxy blocked).</li> ) : 
+                       newsData.ticker.length > 0 ? (
+                        newsData.ticker.slice(0, 3).map((item, i) => (
+                          <li key={i} style={{ marginBottom: '4px' }}><a href={item.link} target="_blank" rel="noreferrer" style={{ color: '#1565c0', textDecoration: 'none' }}>{item.title}</a> <span style={{ color: '#9fb3c8' }}>({item.publisher})</span></li>
+                        ))
+                      ) : ( <li>No recent news found.</li> )}
                     </ul>
                   </div>
                   <div style={{ flex: 1, borderLeft: '1px solid #d9e2ec', paddingLeft: '20px' }}>
                     <h5 style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#334e68' }}>🌎 Macro Context (SPY/S&P 500)</h5>
                     <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '12px', color: '#486581' }}>
-                      {newsData.market.length > 0 ? newsData.market.slice(0, 3).map((item, i) => (
-                        <li key={i} style={{ marginBottom: '4px' }}><a href={item.link} target="_blank" rel="noreferrer" style={{ color: '#1565c0', textDecoration: 'none' }}>{item.title}</a></li>
-                      )) : <li>Fetching market condition...</li>}
+                      {newsData.isLoading ? ( <li>Fetching market condition...</li> ) : 
+                       newsData.hasError ? ( <li style={{color: '#d32f2f'}}>Failed to load market data (proxy blocked).</li> ) : 
+                       newsData.market.length > 0 ? (
+                        newsData.market.slice(0, 3).map((item, i) => (
+                          <li key={i} style={{ marginBottom: '4px' }}><a href={item.link} target="_blank" rel="noreferrer" style={{ color: '#1565c0', textDecoration: 'none' }}>{item.title}</a></li>
+                        ))
+                      ) : ( <li>No market data found.</li> )}
                     </ul>
                   </div>
                 </div>

@@ -78,7 +78,6 @@ export default function App() {
   
   const [technicalOutlook, setTechnicalOutlook] = useState(null);
   
-  // NEW: Added loading and error states to properly manage the UI
   const [newsData, setNewsData] = useState({ ticker: [], market: [], sentiment: null, isLoading: false, hasError: false });
 
   const [startDate, setStartDate] = useState('');
@@ -470,25 +469,39 @@ export default function App() {
       } catch (error) {}
     };
 
-    // 2. Fetch News Context (UPDATED WITH BETTER PROXY AND ERROR HANDLING)
+    // 2. Fetch News Context (NEW GOOGLE NEWS ENGINE)
     const fetchNewsData = async () => {
       try {
         setNewsData({ ticker: [], market: [], sentiment: null, isLoading: true, hasError: false }); 
 
         const tickerBaseTkr = selectedTicker.replace('.TO', ''); 
-        // Using corsproxy.io as it is often more stable for search endpoints
-        const tUrl = `https://corsproxy.io/?${encodeURIComponent(`https://query2.finance.yahoo.com/v1/finance/search?q=${tickerBaseTkr}&quotesCount=0&newsCount=5`)}`;
+        
+        // Use rss2json to safely parse the Google News RSS feeds (Bypasses Yahoo Proxy Blocks!)
+        const tRssUrl = encodeURIComponent(`https://news.google.com/rss/search?q=${tickerBaseTkr}+stock&hl=en-US&gl=US&ceid=US:en`);
+        const tUrl = `https://api.rss2json.com/v1/api.json?rss_url=${tRssUrl}`;
         
         const tRes = await fetch(tUrl); 
         if (!tRes.ok) throw new Error("Ticker news failed");
         const tData = await tRes.json();
-        const tickerNews = tData.news || [];
+        
+        const tickerNews = tData.items ? tData.items.map(item => ({
+            title: item.title,
+            link: item.link,
+            // Google News titles usually end with ' - Publisher Name'
+            publisher: item.title.includes(' - ') ? item.title.split(' - ').pop() : 'News'
+        })) : [];
 
-        const mUrl = `https://corsproxy.io/?${encodeURIComponent(`https://query2.finance.yahoo.com/v1/finance/search?q=SPY&quotesCount=0&newsCount=3`)}`;
+        const mRssUrl = encodeURIComponent(`https://news.google.com/rss/search?q=SP500+stock+market+economy&hl=en-US&gl=US&ceid=US:en`);
+        const mUrl = `https://api.rss2json.com/v1/api.json?rss_url=${mRssUrl}`;
+        
         const mRes = await fetch(mUrl); 
         if (!mRes.ok) throw new Error("Market news failed");
         const mData = await mRes.json();
-        const marketNews = mData.news || [];
+        
+        const marketNews = mData.items ? mData.items.map(item => ({
+            title: item.title,
+            link: item.link
+        })) : [];
 
         const allHeadlines = tickerNews.map(n => n.title);
         const sentiment = analyzeSentiment(allHeadlines);
@@ -496,7 +509,6 @@ export default function App() {
         setNewsData({ ticker: tickerNews, market: marketNews, sentiment, isLoading: false, hasError: false });
       } catch (error) { 
         console.error("Error fetching news:", error); 
-        // Tell the UI that the fetch failed so it stops spinning
         setNewsData(prev => ({ ...prev, isLoading: false, hasError: true }));
       }
     };
@@ -982,10 +994,10 @@ export default function App() {
                     <h5 style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#334e68' }}>📰 Recent {selectedTicker} News</h5>
                     <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '12px', color: '#486581' }}>
                       {newsData.isLoading ? ( <li>Fetching recent news...</li> ) : 
-                       newsData.hasError ? ( <li style={{color: '#d32f2f'}}>Failed to load news (proxy blocked).</li> ) : 
+                       newsData.hasError ? ( <li style={{color: '#d32f2f'}}>Failed to load news. Check internet connection.</li> ) : 
                        newsData.ticker.length > 0 ? (
                         newsData.ticker.slice(0, 3).map((item, i) => (
-                          <li key={i} style={{ marginBottom: '4px' }}><a href={item.link} target="_blank" rel="noreferrer" style={{ color: '#1565c0', textDecoration: 'none' }}>{item.title}</a> <span style={{ color: '#9fb3c8' }}>({item.publisher})</span></li>
+                          <li key={i} style={{ marginBottom: '4px' }}><a href={item.link} target="_blank" rel="noreferrer" style={{ color: '#1565c0', textDecoration: 'none' }}>{item.title.split(' - ').slice(0, -1).join(' - ') || item.title}</a> <span style={{ color: '#9fb3c8' }}>({item.publisher})</span></li>
                         ))
                       ) : ( <li>No recent news found.</li> )}
                     </ul>
@@ -994,10 +1006,10 @@ export default function App() {
                     <h5 style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#334e68' }}>🌎 Macro Context (SPY/S&P 500)</h5>
                     <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '12px', color: '#486581' }}>
                       {newsData.isLoading ? ( <li>Fetching market condition...</li> ) : 
-                       newsData.hasError ? ( <li style={{color: '#d32f2f'}}>Failed to load market data (proxy blocked).</li> ) : 
+                       newsData.hasError ? ( <li style={{color: '#d32f2f'}}>Failed to load market data. Check internet connection.</li> ) : 
                        newsData.market.length > 0 ? (
                         newsData.market.slice(0, 3).map((item, i) => (
-                          <li key={i} style={{ marginBottom: '4px' }}><a href={item.link} target="_blank" rel="noreferrer" style={{ color: '#1565c0', textDecoration: 'none' }}>{item.title}</a></li>
+                          <li key={i} style={{ marginBottom: '4px' }}><a href={item.link} target="_blank" rel="noreferrer" style={{ color: '#1565c0', textDecoration: 'none' }}>{item.title.split(' - ').slice(0, -1).join(' - ') || item.title}</a></li>
                         ))
                       ) : ( <li>No market data found.</li> )}
                     </ul>

@@ -18,6 +18,29 @@ const CYCLE_COLORS = [
   { bg: '#e0f7fa', border: '#0097a7' }, 
 ];
 
+// --- NEW: Technical Analysis Helper Functions ---
+function calculateSMA(data, period) {
+  if (data.length < period) return null;
+  const slice = data.slice(-period);
+  return slice.reduce((a, b) => a + b, 0) / period;
+}
+
+function calculateRSI(data, period) {
+  if (data.length <= period) return null;
+  let gains = 0, losses = 0;
+  for (let i = data.length - period; i < data.length; i++) {
+    const diff = data[i] - data[i - 1];
+    if (diff >= 0) gains += diff;
+    else losses -= diff;
+  }
+  const avgGain = gains / period;
+  const avgLoss = losses / period;
+  if (avgLoss === 0) return 100;
+  const rs = avgGain / avgLoss;
+  return 100 - (100 / (1 + rs));
+}
+// ------------------------------------------------
+
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
@@ -32,6 +55,9 @@ export default function App() {
   const [monthlyStats, setMonthlyStats] = useState({}); 
   const [showClosedPositions, setShowClosedPositions] = useState(true);
   
+  // NEW: State to hold the calculated Technical Outlook
+  const [technicalOutlook, setTechnicalOutlook] = useState(null);
+
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
@@ -164,7 +190,6 @@ export default function App() {
 
           if (uploadFormat === 'IB') {
             const rows = results.data;
-            // Filter strictly based on criteria: Col A='Transaction History', Col B='Data', Col F=(Buy, Sell), Col G len < 6
             const filteredRows = rows.filter(row => 
               row[0] === 'Transaction History' && 
               row[1] === 'Data' && 
@@ -173,14 +198,12 @@ export default function App() {
             );
 
             dbTrades = filteredRows.map(row => {
-              // Strip dashes from date (e.g. 2026-03-24 -> 20260324)
               const rawDate = row[2].replace(/-/g, '');
               const formattedDate = `${rawDate.substring(0, 4)}-${rawDate.substring(4, 6)}-${rawDate.substring(6, 8)}`;
               
               let ticker = row[6].trim();
               const currency = row[9] ? row[9].trim() : '';
               
-              // NEW: If Currency is CAD, append .TO so Yahoo Finance recognizes it as a TSX stock
               if (currency === 'CAD' && !ticker.includes('.')) {
                 ticker = `${ticker}.TO`;
               }
@@ -190,7 +213,6 @@ export default function App() {
                 ticker: ticker,
                 action: row[5].toLowerCase().trim(),
                 price: parseFloat(row[8]),
-                // IB lists sells as negative quantities, force them absolute
                 quantity: Math.abs(parseInt(row[7], 10)) 
               };
             });
@@ -202,7 +224,6 @@ export default function App() {
             return;
 
           } else {
-            // Standard Generic Format
             dbTrades = results.data
               .filter(trade => trade.date && trade.ticker) 
               .map((trade) => {
@@ -384,14 +405,49 @@ export default function App() {
           const result = data.chart.result[0]; const timestamps = result.timestamp; const quote = result.indicators.quote[0];
           const opens = quote.open, highs = quote.high, lows = quote.low, closes = quote.close;
           const realHistoricalData = []; const seenDates = new Set();
+          
           for (let i = 0; i < timestamps.length; i++) {
             if (closes[i] !== null && closes[i] !== undefined) {
               const date = new Date(timestamps[i] * 1000); const formattedDate = date.toISOString().split('T')[0];
-              if (!seenDates.has(formattedDate)) { seenDates.add(formattedDate); realHistoricalData.push({ time: formattedDate, open: opens[i], high: highs[i], low: lows[i], close: closes[i] }); }
+              if (!seenDates.has(formattedDate)) { 
+                seenDates.add(formattedDate); 
+                realHistoricalData.push({ time: formattedDate, open: opens[i], high: highs[i], low: lows[i], close: closes[i] }); 
+              }
             }
           }
-          realHistoricalData.sort((a, b) => new Date(a.time) - new Date(b.time)); seriesRef.current.setData(realHistoricalData);
+          realHistoricalData.sort((a, b) => new Date(a.time) - new Date(b.time)); 
+          seriesRef.current.setData(realHistoricalData);
+
+          // --- NEW: Calculate Technical Outlook ---
+          const closesArray = realHistoricalData.map(d => d.close);
+          if (closesArray.length > 50) {
+            const currentPrice = closesArray[closesArray.length - 1];
+            const sma20 = calculateSMA(closesArray, 20);
+            const sma50 = calculateSMA(closesArray, 50);
+            const rsi14 = calculateRSI(closesArray, 14);
+
+            let trend = 'Neutral';
+            let trendColor = '#555';
+            
+            if (currentPrice > sma20 && sma20 > sma50) { trend = 'Strong Bullish'; trendColor = '#2e7d32'; }
+            else if (currentPrice < sma20 && sma20 < sma50) { trend = 'Strong Bearish'; trendColor = '#c62828'; }
+            else if (currentPrice > sma20) { trend = 'Slightly Bullish'; trendColor = '#4caf50'; }
+            else if (currentPrice < sma20) { trend = 'Slightly Bearish'; trendColor = '#ef5350'; }
+
+            let rsiStatus = 'Neutral';
+            let rsiColor = '#555';
+            if (rsi14 >= 70) { rsiStatus = 'Overbought'; rsiColor = '#c62828'; }
+            else if (rsi14 <= 30) { rsiStatus = 'Oversold'; rsiColor = '#2e7d32'; }
+
+            setTechnicalOutlook({
+              sma20, sma50, rsi14, trend, trendColor, rsiStatus, rsiColor
+            });
+          } else {
+            setTechnicalOutlook(null);
+          }
+          // ------------------------------------------
         }
+        
         const markers = tickerTrades.map((trade) => {
           const colorIdx = (trade.positionNum - 1) % CYCLE_COLORS.length; const markerColor = CYCLE_COLORS[colorIdx].border;
           return { time: trade.formattedDate, position: trade['buy/sell'] === 'buy' ? 'belowBar' : 'aboveBar', color: markerColor, shape: trade['buy/sell'] === 'buy' ? 'arrowUp' : 'arrowDown', text: `${trade['buy/sell'] === 'buy' ? 'B' : 'S'} #${trade.positionNum}: ${trade.quantity}` };
@@ -838,7 +894,36 @@ export default function App() {
           {/* CHART TAB                 */}
           {/* ========================================= */}
           <div style={{ display: activeTab === 'chart' ? 'block' : 'none' }}>
-            <h3 style={{ marginTop: 0 }}>{selectedTicker ? `${selectedTicker} Daily Chart` : 'Select a trade to view the chart'}</h3>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <h3 style={{ margin: 0 }}>{selectedTicker ? `${selectedTicker} Daily Chart` : 'Select a trade to view the chart'}</h3>
+            </div>
+
+            {/* NEW: TECHNICAL OUTLOOK DASHBOARD */}
+            {technicalOutlook && selectedTicker && (
+              <div style={{ display: 'flex', gap: '20px', marginBottom: '15px', backgroundColor: '#f0f4f8', padding: '12px 15px', borderRadius: '6px', border: '1px solid #d9e2ec', alignItems: 'center', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#627d98', textTransform: 'uppercase' }}>Near-Term Trend:</span>
+                  <span style={{ fontSize: '13px', fontWeight: 'bold', color: technicalOutlook.trendColor, padding: '4px 8px', backgroundColor: '#fff', borderRadius: '4px', border: `1px solid ${technicalOutlook.trendColor}` }}>{technicalOutlook.trend}</span>
+                </div>
+                <div style={{ borderLeft: '1px solid #bcccdc', height: '20px' }}></div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#627d98', textTransform: 'uppercase' }}>RSI (14):</span>
+                  <span style={{ fontSize: '14px', fontWeight: 'bold', color: technicalOutlook.rsiColor }}>{technicalOutlook.rsi14.toFixed(1)} <span style={{fontSize:'12px', fontWeight:'normal'}}>({technicalOutlook.rsiStatus})</span></span>
+                </div>
+                <div style={{ borderLeft: '1px solid #bcccdc', height: '20px' }}></div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#627d98', textTransform: 'uppercase' }}>SMA 20:</span>
+                  <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#334e68' }}>${technicalOutlook.sma20.toFixed(2)}</span>
+                </div>
+                <div style={{ borderLeft: '1px solid #bcccdc', height: '20px' }}></div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#627d98', textTransform: 'uppercase' }}>SMA 50:</span>
+                  <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#334e68' }}>${technicalOutlook.sma50.toFixed(2)}</span>
+                </div>
+              </div>
+            )}
+
             <div ref={chartContainerRef} style={{ flex: 1, width: '100%', minHeight: '600px', border: '1px solid #ddd', borderRadius: '4px' }} />
 
             {/* OPEN Position Analytics with NOTES */}

@@ -18,7 +18,7 @@ const CYCLE_COLORS = [
   { bg: '#e0f7fa', border: '#0097a7' }, 
 ];
 
-// --- NEW: Technical Analysis Helper Functions ---
+// --- Technical Analysis Helper Functions ---
 function calculateSMA(data, period) {
   if (data.length < period) return null;
   const slice = data.slice(-period);
@@ -39,6 +39,25 @@ function calculateRSI(data, period) {
   const rs = avgGain / avgLoss;
   return 100 - (100 / (1 + rs));
 }
+
+// --- NEW: Headline Sentiment Analyzer ---
+function analyzeSentiment(headlines) {
+  const positiveWords = ['surge', 'jump', 'up', 'bull', 'beat', 'upgrade', 'higher', 'growth', 'gain', 'buy', 'strong', 'outperform', 'soar', 'record'];
+  const negativeWords = ['plunge', 'drop', 'down', 'bear', 'miss', 'downgrade', 'lower', 'loss', 'sell', 'weak', 'underperform', 'cut', 'fall', 'sink'];
+  
+  let score = 0;
+  headlines.forEach(headline => {
+    const text = headline.toLowerCase();
+    positiveWords.forEach(w => { if (text.includes(w)) score++; });
+    negativeWords.forEach(w => { if (text.includes(w)) score--; });
+  });
+
+  if (score >= 2) return { label: 'Bullish', color: '#2e7d32' };
+  if (score <= -2) return { label: 'Bearish', color: '#c62828' };
+  if (score === 1) return { label: 'Slightly Bullish', color: '#4caf50' };
+  if (score === -1) return { label: 'Slightly Bearish', color: '#ef5350' };
+  return { label: 'Neutral', color: '#555' };
+}
 // ------------------------------------------------
 
 export default function App() {
@@ -55,8 +74,10 @@ export default function App() {
   const [monthlyStats, setMonthlyStats] = useState({}); 
   const [showClosedPositions, setShowClosedPositions] = useState(true);
   
-  // NEW: State to hold the calculated Technical Outlook
   const [technicalOutlook, setTechnicalOutlook] = useState(null);
+  
+  // NEW: State to hold the live news data
+  const [newsData, setNewsData] = useState({ ticker: [], market: [], sentiment: null });
 
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -66,7 +87,6 @@ export default function App() {
   const [riskPrices, setRiskPrices] = useState({});
   const [tradeNotes, setTradeNotes] = useState({});
 
-  // Account Equity State (persisted to localStorage)
   const [accountEquity, setAccountEquity] = useState(() => localStorage.getItem('trade_journal_equity') || '');
 
   const [advancedStats, setAdvancedStats] = useState({
@@ -80,12 +100,10 @@ export default function App() {
   const seriesRef = useRef(null);
   const markersRef = useRef(null); 
 
-  // Modals
   const [isCalcModalOpen, setIsCalcModalOpen] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  const [uploadFormat, setUploadFormat] = useState('IB'); // Default to IB
+  const [uploadFormat, setUploadFormat] = useState('IB'); 
 
-  // Calculator State
   const [calcMode, setCalcMode] = useState('position');
   const [calcTicker, setCalcTicker] = useState('');
   const [calcTotalCapital, setCalcTotalCapital] = useState('');
@@ -175,7 +193,6 @@ export default function App() {
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
     if (!file) return;
-
     const isStandard = uploadFormat === 'Standard';
 
     Papa.parse(file, {
@@ -393,9 +410,13 @@ export default function App() {
     }
   }, [isAuthenticated, activeTab]);
 
+  // --- NEW: Master Data Fetching (Chart Data + News Data) ---
   useEffect(() => {
-    if (!selectedTicker || !seriesRef.current || activeTab !== 'chart') return;
+    if (!selectedTicker || activeTab !== 'chart') return;
+    
+    // 1. Fetch Price Chart Data
     const fetchMarketData = async () => {
+      if (!seriesRef.current) return;
       const tickerTrades = analyzedTrades.filter((t) => t.ticker === selectedTicker);
       if (tickerTrades.length === 0) return;
       try {
@@ -418,7 +439,6 @@ export default function App() {
           realHistoricalData.sort((a, b) => new Date(a.time) - new Date(b.time)); 
           seriesRef.current.setData(realHistoricalData);
 
-          // --- NEW: Calculate Technical Outlook ---
           const closesArray = realHistoricalData.map(d => d.close);
           if (closesArray.length > 50) {
             const currentPrice = closesArray[closesArray.length - 1];
@@ -426,26 +446,18 @@ export default function App() {
             const sma50 = calculateSMA(closesArray, 50);
             const rsi14 = calculateRSI(closesArray, 14);
 
-            let trend = 'Neutral';
-            let trendColor = '#555';
-            
+            let trend = 'Neutral'; let trendColor = '#555';
             if (currentPrice > sma20 && sma20 > sma50) { trend = 'Strong Bullish'; trendColor = '#2e7d32'; }
             else if (currentPrice < sma20 && sma20 < sma50) { trend = 'Strong Bearish'; trendColor = '#c62828'; }
             else if (currentPrice > sma20) { trend = 'Slightly Bullish'; trendColor = '#4caf50'; }
             else if (currentPrice < sma20) { trend = 'Slightly Bearish'; trendColor = '#ef5350'; }
 
-            let rsiStatus = 'Neutral';
-            let rsiColor = '#555';
+            let rsiStatus = 'Neutral'; let rsiColor = '#555';
             if (rsi14 >= 70) { rsiStatus = 'Overbought'; rsiColor = '#c62828'; }
             else if (rsi14 <= 30) { rsiStatus = 'Oversold'; rsiColor = '#2e7d32'; }
 
-            setTechnicalOutlook({
-              sma20, sma50, rsi14, trend, trendColor, rsiStatus, rsiColor
-            });
-          } else {
-            setTechnicalOutlook(null);
-          }
-          // ------------------------------------------
+            setTechnicalOutlook({ sma20, sma50, rsi14, trend, trendColor, rsiStatus, rsiColor });
+          } else { setTechnicalOutlook(null); }
         }
         
         const markers = tickerTrades.map((trade) => {
@@ -456,7 +468,33 @@ export default function App() {
         if (!markersRef.current) markersRef.current = createSeriesMarkers(seriesRef.current, markers); else markersRef.current.setMarkers(markers);
       } catch (error) {}
     };
+
+    // 2. NEW: Fetch News Context
+    const fetchNewsData = async () => {
+      try {
+        setNewsData({ ticker: [], market: [], sentiment: null }); // reset while loading
+
+        // Fetch Ticker Specific News (Yahoo Search API)
+        const tickerBaseTkr = selectedTicker.replace('.TO', ''); // Help the search engine
+        const tUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://query2.finance.yahoo.com/v1/finance/search?q=${tickerBaseTkr}&quotesCount=0&newsCount=5`)}`;
+        const tRes = await fetch(tUrl); const tData = await tRes.json();
+        const tickerNews = tData.news || [];
+
+        // Fetch Macro Market News (using SPY as a proxy for market condition)
+        const mUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://query2.finance.yahoo.com/v1/finance/search?q=SPY&quotesCount=0&newsCount=3`)}`;
+        const mRes = await fetch(mUrl); const mData = await mRes.json();
+        const marketNews = mData.news || [];
+
+        // Run the algorithmic sentiment check on the headlines
+        const allHeadlines = tickerNews.map(n => n.title);
+        const sentiment = analyzeSentiment(allHeadlines);
+
+        setNewsData({ ticker: tickerNews, market: marketNews, sentiment });
+      } catch (error) { console.error("Error fetching news:", error); }
+    };
+
     fetchMarketData();
+    fetchNewsData();
   }, [selectedTicker, analyzedTrades, activeTab]);
 
   const handleCalcTickerBlur = async () => {
@@ -825,7 +863,6 @@ export default function App() {
           {statsArray.length > 0 && (
             <div style={{ display: 'flex', gap: '15px', marginBottom: '20px', flexWrap: 'wrap' }}>
               
-              {/* Row 1: Core Stats */}
               <div title="Gross Profit divided by Gross Loss across all closed trades." style={{ flex: 1, minWidth: '120px', padding: '12px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
                 <div style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Profit Factor</div>
                 <div style={{ fontSize: '20px', fontWeight: 'bold', color: profitFactor > 1 || profitFactor === 'MAX' ? '#2e7d32' : '#d32f2f' }}>{profitFactor}</div>
@@ -899,28 +936,58 @@ export default function App() {
               <h3 style={{ margin: 0 }}>{selectedTicker ? `${selectedTicker} Daily Chart` : 'Select a trade to view the chart'}</h3>
             </div>
 
-            {/* NEW: TECHNICAL OUTLOOK DASHBOARD */}
+            {/* TECHNICAL & NEWS OUTLOOK DASHBOARD */}
             {technicalOutlook && selectedTicker && (
-              <div style={{ display: 'flex', gap: '20px', marginBottom: '15px', backgroundColor: '#f0f4f8', padding: '12px 15px', borderRadius: '6px', border: '1px solid #d9e2ec', alignItems: 'center', flexWrap: 'wrap' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#627d98', textTransform: 'uppercase' }}>Near-Term Trend:</span>
-                  <span style={{ fontSize: '13px', fontWeight: 'bold', color: technicalOutlook.trendColor, padding: '4px 8px', backgroundColor: '#fff', borderRadius: '4px', border: `1px solid ${technicalOutlook.trendColor}` }}>{technicalOutlook.trend}</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', marginBottom: '15px', backgroundColor: '#f0f4f8', padding: '15px', borderRadius: '6px', border: '1px solid #d9e2ec' }}>
+                
+                {/* Top Row: Tech Analysis & Sentiment Score */}
+                <div style={{ display: 'flex', gap: '20px', alignItems: 'center', flexWrap: 'wrap', borderBottom: '1px solid #d9e2ec', paddingBottom: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#627d98', textTransform: 'uppercase' }}>Near-Term Trend:</span>
+                    <span style={{ fontSize: '13px', fontWeight: 'bold', color: technicalOutlook.trendColor, padding: '4px 8px', backgroundColor: '#fff', borderRadius: '4px', border: `1px solid ${technicalOutlook.trendColor}` }}>{technicalOutlook.trend}</span>
+                  </div>
+                  <div style={{ borderLeft: '1px solid #bcccdc', height: '20px' }}></div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#627d98', textTransform: 'uppercase' }}>RSI (14):</span>
+                    <span style={{ fontSize: '14px', fontWeight: 'bold', color: technicalOutlook.rsiColor }}>{technicalOutlook.rsi14.toFixed(1)} <span style={{fontSize:'12px', fontWeight:'normal'}}>({technicalOutlook.rsiStatus})</span></span>
+                  </div>
+                  <div style={{ borderLeft: '1px solid #bcccdc', height: '20px' }}></div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#627d98', textTransform: 'uppercase' }}>SMA 20/50:</span>
+                    <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#334e68' }}>${technicalOutlook.sma20.toFixed(2)} / ${technicalOutlook.sma50.toFixed(2)}</span>
+                  </div>
+                  
+                  {newsData.sentiment && (
+                    <>
+                      <div style={{ borderLeft: '1px solid #bcccdc', height: '20px' }}></div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#627d98', textTransform: 'uppercase' }}>Headline Sentiment:</span>
+                        <span style={{ fontSize: '13px', fontWeight: 'bold', color: newsData.sentiment.color, padding: '4px 8px', backgroundColor: '#fff', borderRadius: '4px', border: `1px solid ${newsData.sentiment.color}` }}>{newsData.sentiment.label}</span>
+                      </div>
+                    </>
+                  )}
                 </div>
-                <div style={{ borderLeft: '1px solid #bcccdc', height: '20px' }}></div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#627d98', textTransform: 'uppercase' }}>RSI (14):</span>
-                  <span style={{ fontSize: '14px', fontWeight: 'bold', color: technicalOutlook.rsiColor }}>{technicalOutlook.rsi14.toFixed(1)} <span style={{fontSize:'12px', fontWeight:'normal'}}>({technicalOutlook.rsiStatus})</span></span>
+
+                {/* Bottom Row: News Headlines */}
+                <div style={{ display: 'flex', gap: '20px' }}>
+                  <div style={{ flex: 1 }}>
+                    <h5 style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#334e68' }}>📰 Recent {selectedTicker} News</h5>
+                    <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '12px', color: '#486581' }}>
+                      {newsData.ticker.length > 0 ? newsData.ticker.slice(0, 3).map((item, i) => (
+                        <li key={i} style={{ marginBottom: '4px' }}><a href={item.link} target="_blank" rel="noreferrer" style={{ color: '#1565c0', textDecoration: 'none' }}>{item.title}</a> <span style={{ color: '#9fb3c8' }}>({item.publisher})</span></li>
+                      )) : <li>Fetching recent news...</li>}
+                    </ul>
+                  </div>
+                  <div style={{ flex: 1, borderLeft: '1px solid #d9e2ec', paddingLeft: '20px' }}>
+                    <h5 style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#334e68' }}>🌎 Macro Context (SPY/S&P 500)</h5>
+                    <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '12px', color: '#486581' }}>
+                      {newsData.market.length > 0 ? newsData.market.slice(0, 3).map((item, i) => (
+                        <li key={i} style={{ marginBottom: '4px' }}><a href={item.link} target="_blank" rel="noreferrer" style={{ color: '#1565c0', textDecoration: 'none' }}>{item.title}</a></li>
+                      )) : <li>Fetching market condition...</li>}
+                    </ul>
+                  </div>
                 </div>
-                <div style={{ borderLeft: '1px solid #bcccdc', height: '20px' }}></div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#627d98', textTransform: 'uppercase' }}>SMA 20:</span>
-                  <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#334e68' }}>${technicalOutlook.sma20.toFixed(2)}</span>
-                </div>
-                <div style={{ borderLeft: '1px solid #bcccdc', height: '20px' }}></div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#627d98', textTransform: 'uppercase' }}>SMA 50:</span>
-                  <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#334e68' }}>${technicalOutlook.sma50.toFixed(2)}</span>
-                </div>
+
               </div>
             )}
 

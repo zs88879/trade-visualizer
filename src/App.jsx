@@ -353,6 +353,7 @@ export default function App() {
         return {
           "Ticker": stat.ticker, "Cycle #": stat.positionNum, "Status": isClosed ? "CLOSED" : "OPEN", "Remaining Qty": stat.qty,
           "Avg Entry Price": stat.avgCost.toFixed(2), "Net Realized P/L ($)": stat.realizedPL.toFixed(2), "Open P/L ($)": stat.qty > 0 ? stat.openPL.toFixed(2) : "0.00",
+          "Break-Even Price": !isClosed ? (stat.avgCost - (stat.realizedPL / stat.qty)).toFixed(2) : "N/A",
           "Gross Profit ($)": stat.grossProfit.toFixed(2), "Gross Loss ($)": stat.grossLoss.toFixed(2), "Win %": stat.tradesClosed > 0 ? ((stat.winningTrades / stat.tradesClosed) * 100).toFixed(0) + '%' : "N/A",
           "Total Trades in Cycle": stat.tradesClosed, "Stop Price": riskPrices[stat.id] || "None", "Trade Journal Notes": tradeNotes[stat.id] || ""
         };
@@ -364,7 +365,6 @@ export default function App() {
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
-  // --- NEW: Robust Native XML Parsing ---
   const handleFetchOutlook = async () => {
     if (!outlookTicker) return;
     setOutlookIsFetching(true);
@@ -372,17 +372,14 @@ export default function App() {
     try {
       const tkr = outlookTicker.toUpperCase().trim();
       
-      // Request simple RSS search from Google
       const query = `${tkr} AND (product OR launch OR partner OR competitor OR operations)`;
       const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`;
       const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(rssUrl)}`;
       
-      // Fetch Raw XML
       const res = await fetch(proxyUrl);
       if (!res.ok) throw new Error("Failed to fetch news");
       const xmlText = await res.text();
       
-      // Parse XML Natively in Browser
       const parser = new DOMParser();
       const xmlDoc = parser.parseFromString(xmlText, "text/xml");
       const itemNodes = xmlDoc.querySelectorAll("item");
@@ -394,10 +391,8 @@ export default function App() {
         publisher: node.querySelector("source")?.textContent || "News"
       }));
       
-      // Step 2: Apply strictly local filter
       items = filterOperationalNews(items);
       
-      // Step 3: Deduplicate
       const uniqueItems = [];
       const seenTitles = new Set();
       for (let item of items) {
@@ -936,6 +931,10 @@ export default function App() {
                     )}
                     {stat.qty > 0 && (
                       <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed #eee' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '4px' }}>
+                          <span style={{ color: '#555' }}>Break-Even Price:</span>
+                          <span style={{ color: '#1565c0', fontWeight: 'bold' }}>${(stat.avgCost - (stat.realizedPL / stat.qty)).toFixed(2)}</span>
+                        </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px', marginBottom: '4px' }}>
                           <span style={{ color: '#555' }}>Stop Price:</span>
                           <div style={{ position: 'relative' }}>
@@ -1091,6 +1090,7 @@ export default function App() {
                 const openRisk = !isNaN(stopPrice) ? (stat.avgCost - stopPrice) * stat.qty : null;
                 const riskPct = !isNaN(stopPrice) && stat.avgCost > 0 ? (((stat.avgCost - stopPrice) / stat.avgCost) * 100).toFixed(2) : null;
                 const openHeat = !isNaN(stopPrice) && stat.currentPrice > 0 ? (stat.currentPrice - stopPrice) * stat.qty : null;
+                const breakEvenPrice = stat.qty > 0 ? stat.avgCost - (stat.realizedPL / stat.qty) : null;
                 
                 const indPosSizePct = parsedEquity > 0 ? (((stat.qty * stat.avgCost) / parsedEquity) * 100).toFixed(2) + '%' : '--';
 
@@ -1107,8 +1107,8 @@ export default function App() {
                         <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#333' }}>{indPosSizePct}</div>
                       </div>
                       <div style={{ flex: 1, minWidth: '120px', padding: '8px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #bbdefb' }}>
-                        <div style={{ fontSize: '10px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Current Days Held</div>
-                        <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#333' }}>{currentDaysHeld} Days</div>
+                        <div style={{ fontSize: '10px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Break-Even</div>
+                        <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#333' }}>${breakEvenPrice !== null ? breakEvenPrice.toFixed(2) : '--'}</div>
                       </div>
                       <div style={{ flex: 1, minWidth: '120px', padding: '8px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #bbdefb' }}>
                         <div style={{ fontSize: '10px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Open Risk</div>
@@ -1175,6 +1175,7 @@ export default function App() {
                   <th title="Percentage of Account Equity allocated to this position." style={{ padding: '12px 10px', textAlign: 'right', color: '#555', cursor: 'help' }}>Pos %</th>
                   <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Realized P/L</th>
                   <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Open P/L</th>
+                  <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Break-Even</th>
                   <th style={{ padding: '12px 10px', textAlign: 'center', color: '#555' }}>Win % / PF</th>
                   <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Days Held</th>
                   <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Stop Price</th>
@@ -1206,6 +1207,7 @@ export default function App() {
                     const openRisk = !isClosed && !isNaN(stopPrice) ? (stat.avgCost - stopPrice) * stat.qty : null;
                     const openHeat = !isClosed && !isNaN(stopPrice) && stat.currentPrice > 0 ? (stat.currentPrice - stopPrice) * stat.qty : null;
                     const tablePosSizePct = !isClosed && parsedEquity > 0 ? (((stat.qty * stat.avgCost) / parsedEquity) * 100).toFixed(2) + '%' : '--';
+                    const breakEvenPrice = !isClosed ? (stat.avgCost - (stat.realizedPL / stat.qty)) : null;
 
                     return (
                       <tr key={stat.id} style={{ borderBottom: '1px solid #eee', backgroundColor: index % 2 === 0 ? '#fff' : '#fafafa', transition: 'background-color 0.2s', cursor: 'pointer' }} onClick={() => { setSelectedTicker(stat.ticker); setActiveTab('chart'); setPortfolioFilter(stat.ticker); setHistoryFilter(stat.ticker); }} onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f1f8ff'} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = index % 2 === 0 ? '#fff' : '#fafafa'}>
@@ -1215,6 +1217,7 @@ export default function App() {
                         <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333' }}>{tablePosSizePct}</td>
                         <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{stat.realizedPL >= 0 ? '+' : ''}{stat.realizedPL === 0 ? '--' : '$' + stat.realizedPL.toFixed(2)}</td>
                         <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.openPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{isClosed ? '--' : (stat.openPL >= 0 ? '+' : '') + '$' + stat.openPL.toFixed(2)}</td>
+                        <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333', fontWeight: 'bold' }}>{isClosed ? '--' : '$' + breakEvenPrice.toFixed(2)}</td>
                         <td style={{ padding: '12px 10px', textAlign: 'center', color: '#555' }}>{posWinRate} / {posPF}</td>
                         <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333' }}>{displayDaysHeld}</td>
                         <td style={{ padding: '8px 10px', textAlign: 'right' }}>

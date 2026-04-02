@@ -350,10 +350,14 @@ export default function App() {
     if (Object.keys(tickerStats).length === 0) { alert("No data available to export."); return; }
     const exportData = Object.values(tickerStats).sort((a, b) => a.ticker.localeCompare(b.ticker) || a.positionNum - b.positionNum).map(stat => {
         const isClosed = stat.qty === 0;
+        const breakEvenPrice = !isClosed ? (stat.avgCost - (stat.realizedPL / stat.qty)) : null;
+        const breakEvenPct = !isClosed && stat.currentPrice > 0 ? ((breakEvenPrice / stat.currentPrice) - 1) * 100 : null;
+        
         return {
           "Ticker": stat.ticker, "Cycle #": stat.positionNum, "Status": isClosed ? "CLOSED" : "OPEN", "Remaining Qty": stat.qty,
           "Avg Entry Price": stat.avgCost.toFixed(2), "Net Realized P/L ($)": stat.realizedPL.toFixed(2), "Open P/L ($)": stat.qty > 0 ? stat.openPL.toFixed(2) : "0.00",
-          "Break-Even Price": !isClosed ? (stat.avgCost - (stat.realizedPL / stat.qty)).toFixed(2) : "N/A",
+          "Break-Even Price": breakEvenPrice !== null ? breakEvenPrice.toFixed(2) : "N/A",
+          "Break-Even %": breakEvenPct !== null ? breakEvenPct.toFixed(2) + '%' : "N/A",
           "Gross Profit ($)": stat.grossProfit.toFixed(2), "Gross Loss ($)": stat.grossLoss.toFixed(2), "Win %": stat.tradesClosed > 0 ? ((stat.winningTrades / stat.tradesClosed) * 100).toFixed(0) + '%' : "N/A",
           "Total Trades in Cycle": stat.tradesClosed, "Stop Price": riskPrices[stat.id] || "None", "Trade Journal Notes": tradeNotes[stat.id] || ""
         };
@@ -913,6 +917,10 @@ export default function App() {
                 const openRisk = !isNaN(stopPrice) ? (stat.avgCost - stopPrice) * stat.qty : null;
                 const riskPct = !isNaN(stopPrice) && stat.avgCost > 0 ? (((stat.avgCost - stopPrice) / stat.avgCost) * 100).toFixed(2) : null;
 
+                const breakEvenPrice = stat.qty > 0 ? stat.avgCost - (stat.realizedPL / stat.qty) : null;
+                const breakEvenPct = breakEvenPrice !== null && stat.currentPrice > 0 ? ((breakEvenPrice / stat.currentPrice) - 1) * 100 : null;
+                const breakEvenPctStr = breakEvenPct !== null ? ` (${breakEvenPct > 0 ? '+' : ''}${breakEvenPct.toFixed(2)}%)` : '';
+
                 return (
                   <div key={stat.id} onClick={() => { setSelectedTicker(stat.ticker); setActiveTab('chart'); setPortfolioFilter(stat.ticker); setHistoryFilter(stat.ticker); }} style={{ padding: '12px', backgroundColor: '#fff', border: '1px solid #e0e0e0', borderRadius: '6px', marginBottom: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', cursor: 'pointer' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '16px', marginBottom: '8px' }}>
@@ -933,7 +941,7 @@ export default function App() {
                       <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed #eee' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '4px' }}>
                           <span style={{ color: '#555' }}>Break-Even Price:</span>
-                          <span style={{ color: '#1565c0', fontWeight: 'bold' }}>${(stat.avgCost - (stat.realizedPL / stat.qty)).toFixed(2)}</span>
+                          <span style={{ color: '#1565c0', fontWeight: 'bold' }}>${breakEvenPrice.toFixed(2)}{breakEvenPctStr}</span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px', marginBottom: '4px' }}>
                           <span style={{ color: '#555' }}>Stop Price:</span>
@@ -1090,7 +1098,10 @@ export default function App() {
                 const openRisk = !isNaN(stopPrice) ? (stat.avgCost - stopPrice) * stat.qty : null;
                 const riskPct = !isNaN(stopPrice) && stat.avgCost > 0 ? (((stat.avgCost - stopPrice) / stat.avgCost) * 100).toFixed(2) : null;
                 const openHeat = !isNaN(stopPrice) && stat.currentPrice > 0 ? (stat.currentPrice - stopPrice) * stat.qty : null;
+                
                 const breakEvenPrice = stat.qty > 0 ? stat.avgCost - (stat.realizedPL / stat.qty) : null;
+                const breakEvenPct = breakEvenPrice !== null && stat.currentPrice > 0 ? ((breakEvenPrice / stat.currentPrice) - 1) * 100 : null;
+                const breakEvenPctStr = breakEvenPct !== null ? ` (${breakEvenPct > 0 ? '+' : ''}${breakEvenPct.toFixed(2)}%)` : '';
                 
                 const indPosSizePct = parsedEquity > 0 ? (((stat.qty * stat.avgCost) / parsedEquity) * 100).toFixed(2) + '%' : '--';
 
@@ -1108,7 +1119,7 @@ export default function App() {
                       </div>
                       <div style={{ flex: 1, minWidth: '120px', padding: '8px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #bbdefb' }}>
                         <div style={{ fontSize: '10px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Break-Even</div>
-                        <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#333' }}>${breakEvenPrice !== null ? breakEvenPrice.toFixed(2) : '--'}</div>
+                        <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#333' }}>{breakEvenPrice !== null ? `$${breakEvenPrice.toFixed(2)}${breakEvenPctStr}` : '--'}</div>
                       </div>
                       <div style={{ flex: 1, minWidth: '120px', padding: '8px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #bbdefb' }}>
                         <div style={{ fontSize: '10px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Open Risk</div>
@@ -1207,7 +1218,10 @@ export default function App() {
                     const openRisk = !isClosed && !isNaN(stopPrice) ? (stat.avgCost - stopPrice) * stat.qty : null;
                     const openHeat = !isClosed && !isNaN(stopPrice) && stat.currentPrice > 0 ? (stat.currentPrice - stopPrice) * stat.qty : null;
                     const tablePosSizePct = !isClosed && parsedEquity > 0 ? (((stat.qty * stat.avgCost) / parsedEquity) * 100).toFixed(2) + '%' : '--';
+                    
                     const breakEvenPrice = !isClosed ? (stat.avgCost - (stat.realizedPL / stat.qty)) : null;
+                    const breakEvenPct = !isClosed && stat.currentPrice > 0 ? ((breakEvenPrice / stat.currentPrice) - 1) * 100 : null;
+                    const breakEvenPctStr = breakEvenPct !== null ? ` (${breakEvenPct > 0 ? '+' : ''}${breakEvenPct.toFixed(2)}%)` : '';
 
                     return (
                       <tr key={stat.id} style={{ borderBottom: '1px solid #eee', backgroundColor: index % 2 === 0 ? '#fff' : '#fafafa', transition: 'background-color 0.2s', cursor: 'pointer' }} onClick={() => { setSelectedTicker(stat.ticker); setActiveTab('chart'); setPortfolioFilter(stat.ticker); setHistoryFilter(stat.ticker); }} onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f1f8ff'} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = index % 2 === 0 ? '#fff' : '#fafafa'}>
@@ -1217,7 +1231,7 @@ export default function App() {
                         <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333' }}>{tablePosSizePct}</td>
                         <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{stat.realizedPL >= 0 ? '+' : ''}{stat.realizedPL === 0 ? '--' : '$' + stat.realizedPL.toFixed(2)}</td>
                         <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.openPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{isClosed ? '--' : (stat.openPL >= 0 ? '+' : '') + '$' + stat.openPL.toFixed(2)}</td>
-                        <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333', fontWeight: 'bold' }}>{isClosed ? '--' : '$' + breakEvenPrice.toFixed(2)}</td>
+                        <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333', fontWeight: 'bold' }}>{isClosed ? '--' : '$' + breakEvenPrice.toFixed(2) + breakEvenPctStr}</td>
                         <td style={{ padding: '12px 10px', textAlign: 'center', color: '#555' }}>{posWinRate} / {posPF}</td>
                         <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333' }}>{displayDaysHeld}</td>
                         <td style={{ padding: '8px 10px', textAlign: 'right' }}>

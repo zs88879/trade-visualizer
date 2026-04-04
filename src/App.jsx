@@ -307,14 +307,34 @@ export default function App() {
             });
           }
 
-          if (dbTrades.length === 0) { alert(`No valid trades found.`); event.target.value = null; return; }
+          if (dbTrades.length === 0) { 
+            alert(`No valid trades found.`); 
+            event.target.value = null; 
+            return; 
+          }
+
           const uniqueDates = [...new Set(dbTrades.map(trade => trade.trade_date))];
+          
+          // --- WARNING ENHANCEMENT ---
+          const confirmMessage = `WARNING: You are uploading trades spanning ${uniqueDates.length} distinct dates.\n\nThis action will OVERWRITE all existing trade history for these dates. If you proceed, trade groupings will be recalculated and any custom trade notes or feedback tags tied to the overwritten cycles may become disconnected or lost.\n\nAre you sure you want to proceed?`;
+          
+          if (!window.confirm(confirmMessage)) {
+            event.target.value = null; 
+            return; // Abort upload
+          }
+          // ---------------------------
+
           await supabase.from('trades').delete().in('trade_date', uniqueDates);
           const { error } = await supabase.from('trades').insert(dbTrades);
           if (error) throw error;
           
-          alert("Trades successfully synced!"); fetchTradesFromDB(); setIsUploadModalOpen(false);
-        } catch (error) { console.error("Upload error:", error); alert("Failed to process the file."); }
+          alert("Trades successfully synced!"); 
+          fetchTradesFromDB(); 
+          setIsUploadModalOpen(false);
+        } catch (error) { 
+          console.error("Upload error:", error); 
+          alert("Failed to process the file. Check console for details."); 
+        }
         event.target.value = null; 
       }
     });

@@ -228,8 +228,15 @@ export default function App() {
   // Fetch data when portfolio or date range changes
   useEffect(() => { 
     if (isAuthenticated) { 
-      // Reset state for new portfolio fetch
-      setTrades([]); setTickerStats({}); setRiskPrices({}); setTradeNotes({}); setSelectedTicker(null);
+      // Fully reset state for new portfolio fetch
+      setTrades([]); 
+      setTickerStats({}); 
+      setRiskPrices({}); 
+      setTradeNotes({}); 
+      setSelectedTicker(null);
+      setPortfolioFilter('All');
+      setHistoryFilter('All');
+
       fetchTradesFromDB(); 
       fetchStopsFromDB(); 
       fetchNotesFromDB(); 
@@ -528,11 +535,16 @@ export default function App() {
     Object.values(stats).forEach(s => { totalWinDays += s.winDays; totalWinShares += s.winShares; totalLossDays += s.lossDays; totalLossShares += s.lossShares; });
     const avgWinDays = totalWinShares > 0 ? (totalWinDays / totalWinShares).toFixed(1) : 0;
     const avgLossDays = totalLossShares > 0 ? (totalLossDays / totalLossShares).toFixed(1) : 0;
+    
+    // Save preliminary UI state *before* live price fetch to avoid blank screens
     setAdvancedStats({ maxDD, maxWinStreak, maxLossStreak, avgWinDays, avgLossDays });
+    setTickerStats({ ...stats }); 
 
     const fetchCurrentPrices = async () => {
       try {
         const openPositions = Object.values(stats).filter(stat => stat.qty > 0);
+        if (openPositions.length === 0) return; // Exit early if no open positions
+
         const uniqueOpenTickers = [...new Set(openPositions.map(s => s.ticker))];
         for (let i = 0; i < uniqueOpenTickers.length; i++) {
           const ticker = uniqueOpenTickers[i];

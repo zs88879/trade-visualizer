@@ -486,7 +486,11 @@ export default function App() {
         while (qtyToClose > 0 && s.openLots.length > 0) {
           let lot = s.openLots[0]; let closeQty = Math.min(qtyToClose, lot.qty); let daysHeld = (tradeDate - lot.date) / (1000 * 60 * 60 * 24);
           s.totalDaysHeld += (daysHeld * closeQty); s.sharesClosed += closeQty;
-          if (pl > 0) { s.winDays += (daysHeld * closeQty); s.winShares += closeQty; } else if (pl < 0) { s.lossDays += (daysHeld * closeQty); s.lossShares += closeQty; }
+          
+          // Apply >0.5% and <-0.5% filters for Average Hold computations
+          if (plPct > 0.005) { s.winDays += (daysHeld * closeQty); s.winShares += closeQty; } 
+          else if (plPct < -0.005) { s.lossDays += (daysHeld * closeQty); s.lossShares += closeQty; }
+          
           lot.qty -= closeQty; qtyToClose -= closeQty; if (lot.qty === 0) s.openLots.shift();
         }
         if (s.qty === 0) positionCounters[trade.ticker]++;
@@ -500,9 +504,14 @@ export default function App() {
     realizedEvents.forEach(e => {
       cumulative += e.pl; if (cumulative > peak) peak = cumulative;
       let drawdown = peak - cumulative; if (drawdown > maxDD) maxDD = drawdown;
-      if (e.plPct > 0.005) { curWin++; maxWinStreak = Math.max(maxWinStreak, curWin); curLoss = 0; } 
-      else if (e.plPct < -0.005) { curLoss++; maxLossStreak = Math.max(maxLossStreak, curLoss); curWin = 0; }
-      else { curWin = 0; curLoss = 0; } // Ignore scratch trades for continuing streaks
+      
+      // Update Streaks strictly off >0.5% and <-0.5%. Ignore scratch entirely.
+      if (e.plPct > 0.005) { 
+          curWin++; maxWinStreak = Math.max(maxWinStreak, curWin); curLoss = 0; 
+      } else if (e.plPct < -0.005) { 
+          curLoss++; maxLossStreak = Math.max(maxLossStreak, curLoss); curWin = 0; 
+      }
+      // If scratch trade (-0.5% to 0.5%), do nothing: don't break the streak, don't increment.
     });
 
     let totalWinDays = 0, totalWinShares = 0; let totalLossDays = 0, totalLossShares = 0;
@@ -1105,11 +1114,11 @@ export default function App() {
                 <div style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Avg Hold (Overall)</div>
                 <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#333' }}>{globalAvgDaysHeld} Days</div>
               </div>
-              <div title="Average days held for trades that closed in profit." style={{ flex: 1, minWidth: '140px', padding: '12px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
+              <div title="Average days held for trades that closed in profit (> 0.5%)." style={{ flex: 1, minWidth: '140px', padding: '12px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
                 <div style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Avg Hold (Wins)</div>
                 <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#2e7d32' }}>{advancedStats.avgWinDays} Days</div>
               </div>
-              <div title="Average days held for trades that closed at a loss." style={{ flex: 1, minWidth: '140px', padding: '12px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
+              <div title="Average days held for trades that closed at a loss (< -0.5%)." style={{ flex: 1, minWidth: '140px', padding: '12px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
                 <div style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Avg Hold (Losses)</div>
                 <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#d32f2f' }}>{advancedStats.avgLossDays} Days</div>
               </div>

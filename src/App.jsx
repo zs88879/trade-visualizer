@@ -64,9 +64,15 @@ export default function App() {
   const [passwordInput, setPasswordInput] = useState('');
   const [authError, setAuthError] = useState(false);
 
+  // --- Portfolio & Settings State ---
+  const [portfolios, setPortfolios] = useState(['Default']);
+  const [selectedPortfolio, setSelectedPortfolio] = useState('Default');
+  const [entryMethods, setEntryMethods] = useState([]);
+  const [feedbacks, setFeedbacks] = useState([]);
+
+  // --- Trade Data State ---
   const [trades, setTrades] = useState([]);
   const [analyzedTrades, setAnalyzedTrades] = useState([]);
-  
   const [selectedTicker, setSelectedTicker] = useState(null);
   const [tickerStats, setTickerStats] = useState({}); 
   const [monthlyStats, setMonthlyStats] = useState({}); 
@@ -74,40 +80,39 @@ export default function App() {
   
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-
   const [historyFilter, setHistoryFilter] = useState('All');
   const [portfolioFilter, setPortfolioFilter] = useState('All');
+  
   const [riskPrices, setRiskPrices] = useState({});
   const [tradeNotes, setTradeNotes] = useState({});
-
-  const [accountEquity, setAccountEquity] = useState(() => localStorage.getItem('trade_journal_equity') || '');
-
-  // DB-Driven Dropdown Definitions State
-  const [entryMethods, setEntryMethods] = useState([]);
-  const [feedbacks, setFeedbacks] = useState([]);
+  const [accountEquity, setAccountEquity] = useState('');
 
   const [advancedStats, setAdvancedStats] = useState({ maxDD: 0, maxWinStreak: 0, maxLossStreak: 0, avgWinDays: 0, avgLossDays: 0 });
   const [activeTab, setActiveTab] = useState('chart');
 
+  // --- Refs ---
   const chartContainerRef = useRef();
   const chartRef = useRef(null);
   const seriesRef = useRef(null);
   const markersRef = useRef(null); 
 
+  // --- Modal States ---
   const [isCalcModalOpen, setIsCalcModalOpen] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [uploadFormat, setUploadFormat] = useState('IB'); 
-  
   const [isOutlookModalOpen, setIsOutlookModalOpen] = useState(false);
   const [outlookTicker, setOutlookTicker] = useState('');
   const [outlookIsFetching, setOutlookIsFetching] = useState(false);
   const [outlookResults, setOutlookResults] = useState(null); 
-
   const [isEntryMethodModalOpen, setIsEntryMethodModalOpen] = useState(false);
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
+  const [isPortfolioModalOpen, setIsPortfolioModalOpen] = useState(false);
+  
   const [newEntryMethod, setNewEntryMethod] = useState('');
   const [newFeedback, setNewFeedback] = useState('');
+  const [newPortfolio, setNewPortfolio] = useState('');
 
+  // --- Calculator State ---
   const [calcMode, setCalcMode] = useState('position');
   const [calcTicker, setCalcTicker] = useState('');
   const [calcTotalCapital, setCalcTotalCapital] = useState('');
@@ -119,7 +124,19 @@ export default function App() {
   const [calcHighOfDay, setCalcHighOfDay] = useState(null); 
   const [calcLowOfDay, setCalcLowOfDay] = useState(null); 
 
-  useEffect(() => { localStorage.setItem('trade_journal_equity', accountEquity); }, [accountEquity]);
+  // Handle Equity persistence per portfolio
+  useEffect(() => {
+    if (selectedPortfolio) {
+      const savedEquity = localStorage.getItem(`trade_journal_equity_${selectedPortfolio}`);
+      setAccountEquity(savedEquity || '');
+    }
+  }, [selectedPortfolio]);
+
+  useEffect(() => {
+    if (selectedPortfolio && accountEquity !== undefined) {
+      localStorage.setItem(`trade_journal_equity_${selectedPortfolio}`, accountEquity);
+    }
+  }, [accountEquity, selectedPortfolio]);
 
   const handleLogin = (e) => {
     e.preventDefault();
@@ -136,8 +153,16 @@ export default function App() {
       const { data, error } = await supabase.from('user_settings').select('*');
       if (error) throw error;
       if (data) {
+        const ports = data.find(r => r.setting_type === 'portfolios');
         const entries = data.find(r => r.setting_type === 'entry_methods');
         const fbs = data.find(r => r.setting_type === 'feedbacks');
+        
+        if (ports && ports.setting_values?.length > 0) {
+          setPortfolios(ports.setting_values);
+          if (!ports.setting_values.includes(selectedPortfolio)) {
+            setSelectedPortfolio(ports.setting_values[0]);
+          }
+        }
         if (entries) setEntryMethods(entries.setting_values || []);
         if (fbs) setFeedbacks(fbs.setting_values || []);
       }
@@ -152,7 +177,7 @@ export default function App() {
 
   const fetchStopsFromDB = async () => {
     try {
-      const { data, error } = await supabase.from('active_stops').select('*');
+      const { data, error } = await supabase.from('active_stops').select('*').eq('portfolio', selectedPortfolio);
       if (error) throw error;
       if (data) {
         const stopsObj = {};
@@ -164,7 +189,7 @@ export default function App() {
 
   const fetchNotesFromDB = async () => {
     try {
-      const { data, error } = await supabase.from('trade_notes').select('*');
+      const { data, error } = await supabase.from('trade_notes').select('*').eq('portfolio', selectedPortfolio);
       if (error) throw error;
       if (data) {
         const notesObj = {};
@@ -177,8 +202,9 @@ export default function App() {
   };
 
   const fetchTradesFromDB = async () => {
+    if (!selectedPortfolio) return;
     try {
-      let query = supabase.from('trades').select('*');
+      let query = supabase.from('trades').select('*').eq('portfolio', selectedPortfolio);
       if (startDate) query = query.gte('trade_date', startDate);
       if (endDate) query = query.lte('trade_date', endDate);
       const { data, error } = await query;
@@ -199,21 +225,24 @@ export default function App() {
     } catch (error) { console.error("Error fetching from DB:", error.message); }
   };
 
+  // Fetch data when portfolio or date range changes
   useEffect(() => { 
     if (isAuthenticated) { 
+      // Reset state for new portfolio fetch
+      setTrades([]); setTickerStats({}); setRiskPrices({}); setTradeNotes({}); setSelectedTicker(null);
       fetchTradesFromDB(); 
       fetchStopsFromDB(); 
       fetchNotesFromDB(); 
       fetchSettingsFromDB(); 
     } 
-  }, [startDate, endDate, isAuthenticated]);
+  }, [startDate, endDate, isAuthenticated, selectedPortfolio]);
 
   // --- SYNC FUNCTIONS ---
   const syncStopPrice = async (posId, price) => {
     const val = parseFloat(price);
     try {
-      if (!isNaN(val)) await supabase.from('active_stops').upsert({ position_id: posId, stop_price: val });
-      else await supabase.from('active_stops').delete().eq('position_id', posId);
+      if (!isNaN(val)) await supabase.from('active_stops').upsert({ portfolio: selectedPortfolio, position_id: posId, stop_price: val });
+      else await supabase.from('active_stops').delete().match({ portfolio: selectedPortfolio, position_id: posId });
     } catch (error) { console.error("Network or code error:", error.message); }
   };
 
@@ -230,9 +259,10 @@ export default function App() {
     
     try {
       if (isEmpty) {
-        await supabase.from('trade_notes').delete().eq('position_id', posId);
+        await supabase.from('trade_notes').delete().match({ portfolio: selectedPortfolio, position_id: posId });
       } else {
         await supabase.from('trade_notes').upsert({ 
+          portfolio: selectedPortfolio,
           position_id: posId, 
           note: currentData.note,
           entry_method: currentData.entryMethod,
@@ -242,7 +272,26 @@ export default function App() {
     } catch (error) { console.error("Error syncing trade note to DB:", error.message); }
   };
 
-  // List Modification Handlers
+  // --- LIST MODIFICATION HANDLERS ---
+  const handleAddPortfolio = () => {
+    const trimmed = newPortfolio.trim();
+    if (trimmed && !portfolios.includes(trimmed)) {
+      const updated = [...portfolios, trimmed];
+      setPortfolios(updated);
+      updateSettingInDB('portfolios', updated);
+      setNewPortfolio('');
+      setSelectedPortfolio(trimmed);
+    }
+  };
+
+  const handleRemovePortfolio = (item) => {
+    if (portfolios.length === 1) { alert("You must have at least one portfolio."); return; }
+    const updated = portfolios.filter(p => p !== item);
+    setPortfolios(updated);
+    updateSettingInDB('portfolios', updated);
+    if (selectedPortfolio === item) setSelectedPortfolio(updated[0]);
+  };
+
   const handleAddEntryMethod = () => {
     const trimmed = newEntryMethod.trim();
     if (trimmed && !entryMethods.includes(trimmed)) {
@@ -275,6 +324,7 @@ export default function App() {
     updateSettingInDB('feedbacks', updated);
   };
 
+  // --- UPLOAD HANDLER ---
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -295,7 +345,7 @@ export default function App() {
               const formattedDate = `${rawDate.substring(0, 4)}-${rawDate.substring(4, 6)}-${rawDate.substring(6, 8)}`;
               let ticker = row[6].trim();
               if ((row[9] ? row[9].trim() : '') === 'CAD' && !ticker.includes('.')) ticker = `${ticker}.TO`;
-              return { trade_date: formattedDate, ticker: ticker, action: row[5].toLowerCase().trim(), price: parseFloat(row[8]), quantity: Math.abs(parseInt(row[7], 10)) };
+              return { portfolio: selectedPortfolio, trade_date: formattedDate, ticker: ticker, action: row[5].toLowerCase().trim(), price: parseFloat(row[8]), quantity: Math.abs(parseInt(row[7], 10)) };
             });
           } else if (uploadFormat === 'Questrade') {
             alert("Questrade parsing logic coming soon! Please provide a sample file.");
@@ -303,38 +353,24 @@ export default function App() {
           } else {
             dbTrades = results.data.filter(trade => trade.date && trade.ticker).map((trade) => {
                 const dateStr = String(trade.date).trim();
-                return { trade_date: `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}`, ticker: trade.ticker.trim(), action: trade['buy/sell'] ? trade['buy/sell'].toLowerCase().trim() : '', price: parseFloat(trade.price), quantity: Math.abs(parseInt(trade.quantity, 10)) };
+                return { portfolio: selectedPortfolio, trade_date: `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}`, ticker: trade.ticker.trim(), action: trade['buy/sell'] ? trade['buy/sell'].toLowerCase().trim() : '', price: parseFloat(trade.price), quantity: Math.abs(parseInt(trade.quantity, 10)) };
             });
           }
 
-          if (dbTrades.length === 0) { 
-            alert(`No valid trades found.`); 
-            event.target.value = null; 
-            return; 
-          }
-
+          if (dbTrades.length === 0) { alert(`No valid trades found.`); event.target.value = null; return; }
           const uniqueDates = [...new Set(dbTrades.map(trade => trade.trade_date))];
           
-          // --- WARNING ENHANCEMENT ---
-          const confirmMessage = `WARNING: You are uploading trades spanning ${uniqueDates.length} distinct dates.\n\nThis action will OVERWRITE all existing trade history for these dates. If you proceed, trade groupings will be recalculated and any custom trade notes or feedback tags tied to the overwritten cycles may become disconnected or lost.\n\nAre you sure you want to proceed?`;
-          
-          if (!window.confirm(confirmMessage)) {
-            event.target.value = null; 
-            return; // Abort upload
-          }
-          // ---------------------------
+          const confirmMessage = `WARNING: You are uploading trades to [${selectedPortfolio}] spanning ${uniqueDates.length} distinct dates.\n\nThis will OVERWRITE existing trade history on these specific dates for this portfolio. Custom notes tied to overwritten cycles may disconnect.\n\nProceed with upload?`;
+          if (!window.confirm(confirmMessage)) { event.target.value = null; return; }
 
-          await supabase.from('trades').delete().in('trade_date', uniqueDates);
+          await supabase.from('trades').delete().in('trade_date', uniqueDates).eq('portfolio', selectedPortfolio);
           const { error } = await supabase.from('trades').insert(dbTrades);
           if (error) throw error;
           
-          alert("Trades successfully synced!"); 
+          alert(`Trades successfully synced to ${selectedPortfolio}!`); 
           fetchTradesFromDB(); 
           setIsUploadModalOpen(false);
-        } catch (error) { 
-          console.error("Upload error:", error); 
-          alert("Failed to process the file. Check console for details."); 
-        }
+        } catch (error) { console.error("Upload error:", error); alert("Failed to process the file."); }
         event.target.value = null; 
       }
     });
@@ -350,6 +386,7 @@ export default function App() {
         const notesObj = tradeNotes[stat.id] || {};
 
         return {
+          "Portfolio": selectedPortfolio,
           "Ticker": stat.ticker, "Cycle #": stat.positionNum, "Status": isClosed ? "CLOSED" : "OPEN", "Remaining Qty": stat.qty,
           "Avg Entry Price": stat.avgCost.toFixed(2), "Net Realized P/L ($)": stat.realizedPL.toFixed(2), "Open P/L ($)": stat.qty > 0 ? stat.openPL.toFixed(2) : "0.00",
           "Break-Even Price": breakEvenPrice !== null ? breakEvenPrice.toFixed(2) : "N/A",
@@ -367,7 +404,7 @@ export default function App() {
     const csv = Papa.unparse(exportData);
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement("a"); link.href = url; link.setAttribute("download", `trade_journal_export_${new Date().toISOString().split('T')[0]}.csv`);
+    const link = document.createElement("a"); link.href = url; link.setAttribute("download", `trade_journal_${selectedPortfolio}_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
@@ -689,7 +726,25 @@ export default function App() {
       
       {/* HEADER */}
       <div style={{ padding: '15px 20px', backgroundColor: '#f5f5f5', borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '15px' }}>
-        <h2 style={{ margin: 0 }}>Trade Visualizer</h2>
+        
+        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+          <h2 style={{ margin: 0 }}>Trade Visualizer</h2>
+          <div style={{ borderLeft: '2px solid #ddd', height: '24px' }}></div>
+          
+          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#555' }}>Portfolio:</span>
+            <select 
+              value={selectedPortfolio} 
+              onChange={(e) => setSelectedPortfolio(e.target.value)}
+              style={{ padding: '6px 10px', borderRadius: '4px', border: '1px solid #1565c0', outline: 'none', fontSize: '14px', fontWeight: 'bold', color: '#1565c0', backgroundColor: '#e3f2fd', cursor: 'pointer' }}>
+              {portfolios.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+            <button onClick={() => setIsPortfolioModalOpen(true)} title="Manage Portfolios" style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#666', padding: '4px' }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+            </button>
+          </div>
+        </div>
+
         <div style={{ display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap' }}>
           
           <button onClick={() => setIsCalcModalOpen(true)} style={{ padding: '8px 12px', backgroundColor: '#2e7d32', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -723,7 +778,7 @@ export default function App() {
           <div style={{ borderLeft: '2px solid #ddd', height: '24px' }}></div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div title="Your Total Portfolio Value (Cash + Invested). Automatically saves to your browser." style={{ display: 'flex', alignItems: 'center', backgroundColor: '#e3f2fd', padding: '4px 8px', borderRadius: '4px', border: '1px solid #90caf9' }}>
+            <div title={`Total Value for ${selectedPortfolio}. Auto-saves locally.`} style={{ display: 'flex', alignItems: 'center', backgroundColor: '#e3f2fd', padding: '4px 8px', borderRadius: '4px', border: '1px solid #90caf9' }}>
               <label style={{ fontSize: '12px', fontWeight: 'bold', color: '#1565c0', marginRight: '6px', textTransform: 'uppercase' }}>Equity $:</label>
               <input type="number" value={accountEquity} onChange={(e) => setAccountEquity(e.target.value)} style={{ padding: '4px', borderRadius: '4px', border: '1px solid #ccc', width: '100px', outline: 'none' }} placeholder="100000" />
             </div>
@@ -744,6 +799,30 @@ export default function App() {
           <button onClick={() => setIsAuthenticated(false)} style={{ padding: '6px 12px', backgroundColor: '#f44336', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>Lock</button>
         </div>
       </div>
+
+      {/* PORTFOLIO MANAGER MODAL */}
+      {isPortfolioModalOpen && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ backgroundColor: '#fff', padding: '25px', borderRadius: '8px', width: '380px', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '2px solid #eee', paddingBottom: '10px' }}>
+              <h3 style={{ margin: 0, color: '#333' }}>Manage Portfolios</h3>
+              <button onClick={() => setIsPortfolioModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#888' }}>&times;</button>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '15px' }}>
+              <input type="text" value={newPortfolio} onChange={(e) => setNewPortfolio(e.target.value)} placeholder="E.g. TFSA, Margin..." style={{ flex: 1, padding: '8px', border: '1px solid #ccc', borderRadius: '4px', outline: 'none' }} />
+              <button onClick={handleAddPortfolio} style={{ padding: '8px 12px', backgroundColor: '#1565c0', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Add</button>
+            </div>
+            <ul style={{ listStyle: 'none', padding: 0, margin: 0, maxHeight: '200px', overflowY: 'auto' }}>
+              {portfolios.map((p, idx) => (
+                <li key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', backgroundColor: '#f5f5f5', marginBottom: '5px', borderRadius: '4px' }}>
+                  <span style={{ fontSize: '14px', color: '#333', fontWeight: p === selectedPortfolio ? 'bold' : 'normal' }}>{p} {p === selectedPortfolio && '(Active)'}</span>
+                  <button onClick={() => handleRemovePortfolio(p)} style={{ background: 'none', border: 'none', color: '#d32f2f', cursor: 'pointer', fontSize: '16px', fontWeight: 'bold' }}>&times;</button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
 
       {/* ENTRY METHOD CONFIG MODAL */}
       {isEntryMethodModalOpen && (
@@ -856,7 +935,7 @@ export default function App() {
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
           <div style={{ backgroundColor: '#fff', padding: '25px', borderRadius: '8px', width: '380px', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '2px solid #eee', paddingBottom: '10px' }}>
-              <h3 style={{ margin: 0, color: '#333' }}>Upload Transactions</h3>
+              <h3 style={{ margin: 0, color: '#333' }}>Upload to [{selectedPortfolio}]</h3>
               <button onClick={() => setIsUploadModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#888' }}>&times;</button>
             </div>
             

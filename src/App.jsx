@@ -18,49 +18,6 @@ const CYCLE_COLORS = [
   { bg: '#e0f7fa', border: '#0097a7' }, 
 ];
 
-// --- Technical Analysis Helper Functions ---
-function calculateSMA(data, period) {
-  if (data.length < period) return null;
-  const slice = data.slice(-period);
-  return slice.reduce((a, b) => a + b, 0) / period;
-}
-
-function calculateRSI(data, period) {
-  if (data.length <= period) return null;
-  let gains = 0, losses = 0;
-  for (let i = data.length - period; i < data.length; i++) {
-    const diff = data[i] - data[i - 1];
-    if (diff >= 0) gains += diff;
-    else losses -= diff;
-  }
-  const avgGain = gains / period;
-  const avgLoss = losses / period;
-  if (avgLoss === 0) return 100;
-  const rs = avgGain / avgLoss;
-  return 100 - (100 / (1 + rs));
-}
-
-// --- Headline Sentiment Analyzer ---
-function analyzeSentiment(headlines) {
-  if (!headlines || headlines.length === 0) return { label: 'Neutral', color: '#555' };
-  
-  const positiveWords = ['surge', 'jump', 'up', 'bull', 'beat', 'upgrade', 'higher', 'growth', 'gain', 'buy', 'strong', 'outperform', 'soar', 'record'];
-  const negativeWords = ['plunge', 'drop', 'down', 'bear', 'miss', 'downgrade', 'lower', 'loss', 'sell', 'weak', 'underperform', 'cut', 'fall', 'sink'];
-  
-  let score = 0;
-  headlines.forEach(headline => {
-    const text = headline.toLowerCase();
-    positiveWords.forEach(w => { if (text.includes(w)) score++; });
-    negativeWords.forEach(w => { if (text.includes(w)) score--; });
-  });
-
-  if (score >= 2) return { label: 'Bullish', color: '#2e7d32' };
-  if (score <= -2) return { label: 'Bearish', color: '#c62828' };
-  if (score === 1) return { label: 'Slightly Bullish', color: '#4caf50' };
-  if (score === -1) return { label: 'Slightly Bearish', color: '#ef5350' };
-  return { label: 'Neutral', color: '#555' };
-}
-
 // --- Operational News Filter & Outlook Analysis ---
 const FINANCIAL_JARGON = [
   'stock', 'share', 'price target', 'buy', 'sell', 'hold', 'rating', 'analyst', 
@@ -83,40 +40,21 @@ function generateOutlookAnalysis(ticker, newsItems) {
   }
 
   let analysis = `Based on recent operational news, ${ticker}'s near-term fundamental outlook is driven by several key developments. `;
-  
   const textCorpus = newsItems.map(n => n.title.toLowerCase()).join(" ");
-  
   let themes = [];
-  if (textCorpus.includes('launch') || textCorpus.includes('release') || textCorpus.includes('new product') || textCorpus.includes('announce')) {
-    themes.push("rolling out new products and services");
-  }
-  if (textCorpus.includes('partner') || textCorpus.includes('collaborat') || textCorpus.includes('deal') || textCorpus.includes('pact') || textCorpus.includes('join forces')) {
-    themes.push("forging strategic partnerships");
-  }
-  if (textCorpus.includes('acquir') || textCorpus.includes('buyout') || textCorpus.includes('merger')) {
-    themes.push("expanding through M&A activity");
-  }
-  if (textCorpus.includes('sue') || textCorpus.includes('lawsuit') || textCorpus.includes('court') || textCorpus.includes('probe') || textCorpus.includes('investigat')) {
-    themes.push("navigating active legal or regulatory challenges");
-  }
-  if (textCorpus.includes('layoff') || textCorpus.includes('cut') || textCorpus.includes('restructur') || textCorpus.includes('resign') || textCorpus.includes('ceo')) {
-    themes.push("undergoing internal restructuring or leadership changes");
-  }
-  if (textCorpus.includes('compet') || textCorpus.includes('rival') || textCorpus.includes('vs')) {
-    themes.push("facing active shifts in its competitive landscape");
-  }
-  if (textCorpus.includes('patent') || textCorpus.includes('trial') || textCorpus.includes('fda') || textCorpus.includes('r&d')) {
-    themes.push("advancing key R&D initiatives");
-  }
+  
+  if (textCorpus.includes('launch') || textCorpus.includes('release') || textCorpus.includes('new product') || textCorpus.includes('announce')) themes.push("rolling out new products and services");
+  if (textCorpus.includes('partner') || textCorpus.includes('collaborat') || textCorpus.includes('deal') || textCorpus.includes('pact') || textCorpus.includes('join forces')) themes.push("forging strategic partnerships");
+  if (textCorpus.includes('acquir') || textCorpus.includes('buyout') || textCorpus.includes('merger')) themes.push("expanding through M&A activity");
+  if (textCorpus.includes('sue') || textCorpus.includes('lawsuit') || textCorpus.includes('court') || textCorpus.includes('probe') || textCorpus.includes('investigat')) themes.push("navigating active legal or regulatory challenges");
+  if (textCorpus.includes('layoff') || textCorpus.includes('cut') || textCorpus.includes('restructur') || textCorpus.includes('resign') || textCorpus.includes('ceo')) themes.push("undergoing internal restructuring or leadership changes");
+  if (textCorpus.includes('compet') || textCorpus.includes('rival') || textCorpus.includes('vs')) themes.push("facing active shifts in its competitive landscape");
+  if (textCorpus.includes('patent') || textCorpus.includes('trial') || textCorpus.includes('fda') || textCorpus.includes('r&d')) themes.push("advancing key R&D initiatives");
 
-  if (themes.length > 0) {
-    analysis += `The company's management is currently focused on ${themes.join(", and ")}. `;
-  } else {
-    analysis += `The company is maintaining its core operational trajectory without major structural shifts in the recent news cycle. `;
-  }
+  if (themes.length > 0) analysis += `The company's management is currently focused on ${themes.join(", and ")}. `;
+  else analysis += `The company is maintaining its core operational trajectory without major structural shifts in the recent news cycle. `;
 
   analysis += `Overall, the focus remains firmly on executing fundamental business operations and product roadmap delivery rather than immediate market fluctuations.`;
-
   return analysis;
 }
 // ------------------------------------------------
@@ -131,13 +69,9 @@ export default function App() {
   
   const [selectedTicker, setSelectedTicker] = useState(null);
   const [tickerStats, setTickerStats] = useState({}); 
-  const [dayOfWeekStats, setDayOfWeekStats] = useState({}); 
   const [monthlyStats, setMonthlyStats] = useState({}); 
   const [showClosedPositions, setShowClosedPositions] = useState(true);
   
-  const [technicalOutlook, setTechnicalOutlook] = useState(null);
-  const [newsData, setNewsData] = useState({ ticker: [], market: [], sentiment: null, isLoading: false, hasError: false });
-
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
@@ -148,10 +82,11 @@ export default function App() {
 
   const [accountEquity, setAccountEquity] = useState(() => localStorage.getItem('trade_journal_equity') || '');
 
-  const [advancedStats, setAdvancedStats] = useState({
-    maxDD: 0, maxWinStreak: 0, maxLossStreak: 0, avgWinDays: 0, avgLossDays: 0
-  });
+  // DB-Driven Dropdown Definitions State
+  const [entryMethods, setEntryMethods] = useState([]);
+  const [feedbacks, setFeedbacks] = useState([]);
 
+  const [advancedStats, setAdvancedStats] = useState({ maxDD: 0, maxWinStreak: 0, maxLossStreak: 0, avgWinDays: 0, avgLossDays: 0 });
   const [activeTab, setActiveTab] = useState('chart');
 
   const chartContainerRef = useRef();
@@ -167,6 +102,11 @@ export default function App() {
   const [outlookTicker, setOutlookTicker] = useState('');
   const [outlookIsFetching, setOutlookIsFetching] = useState(false);
   const [outlookResults, setOutlookResults] = useState(null); 
+
+  const [isEntryMethodModalOpen, setIsEntryMethodModalOpen] = useState(false);
+  const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
+  const [newEntryMethod, setNewEntryMethod] = useState('');
+  const [newFeedback, setNewFeedback] = useState('');
 
   const [calcMode, setCalcMode] = useState('position');
   const [calcTicker, setCalcTicker] = useState('');
@@ -190,6 +130,26 @@ export default function App() {
     }
   };
 
+  // --- DB FETCHING FUNCTIONS ---
+  const fetchSettingsFromDB = async () => {
+    try {
+      const { data, error } = await supabase.from('user_settings').select('*');
+      if (error) throw error;
+      if (data) {
+        const entries = data.find(r => r.setting_type === 'entry_methods');
+        const fbs = data.find(r => r.setting_type === 'feedbacks');
+        if (entries) setEntryMethods(entries.setting_values || []);
+        if (fbs) setFeedbacks(fbs.setting_values || []);
+      }
+    } catch (error) { console.error("Error fetching settings:", error.message); }
+  };
+
+  const updateSettingInDB = async (settingType, newValuesArray) => {
+    try {
+      await supabase.from('user_settings').upsert({ setting_type: settingType, setting_values: newValuesArray }, { onConflict: 'setting_type' });
+    } catch (error) { console.error(`Error saving ${settingType}:`, error.message); }
+  };
+
   const fetchStopsFromDB = async () => {
     try {
       const { data, error } = await supabase.from('active_stops').select('*');
@@ -208,7 +168,9 @@ export default function App() {
       if (error) throw error;
       if (data) {
         const notesObj = {};
-        data.forEach(row => { notesObj[row.position_id] = row.note; });
+        data.forEach(row => { 
+          notesObj[row.position_id] = { note: row.note || '', entryMethod: row.entry_method || '', feedback: row.feedback || '' }; 
+        });
         setTradeNotes(notesObj);
       }
     } catch (error) { console.error("Error fetching notes from DB:", error.message); }
@@ -237,8 +199,16 @@ export default function App() {
     } catch (error) { console.error("Error fetching from DB:", error.message); }
   };
 
-  useEffect(() => { if (isAuthenticated) { fetchTradesFromDB(); fetchStopsFromDB(); fetchNotesFromDB(); } }, [startDate, endDate, isAuthenticated]);
+  useEffect(() => { 
+    if (isAuthenticated) { 
+      fetchTradesFromDB(); 
+      fetchStopsFromDB(); 
+      fetchNotesFromDB(); 
+      fetchSettingsFromDB(); 
+    } 
+  }, [startDate, endDate, isAuthenticated]);
 
+  // --- SYNC FUNCTIONS ---
   const syncStopPrice = async (posId, price) => {
     const val = parseFloat(price);
     try {
@@ -247,11 +217,62 @@ export default function App() {
     } catch (error) { console.error("Network or code error:", error.message); }
   };
 
-  const syncTradeNote = async (posId, note) => {
+  const handleNoteDataChange = (posId, field, value) => {
+    setTradeNotes(prev => ({
+      ...prev,
+      [posId]: { ...(prev[posId] || { note: '', entryMethod: '', feedback: '' }), [field]: value }
+    }));
+  };
+
+  const syncTradeNoteData = async (posId) => {
+    const currentData = tradeNotes[posId] || { note: '', entryMethod: '', feedback: '' };
+    const isEmpty = (!currentData.note || currentData.note.trim() === '') && (!currentData.entryMethod || currentData.entryMethod.trim() === '') && (!currentData.feedback || currentData.feedback.trim() === '');
+    
     try {
-      if (!note || note.trim() === '') await supabase.from('trade_notes').delete().eq('position_id', posId);
-      else await supabase.from('trade_notes').upsert({ position_id: posId, note: note });
-    } catch (error) { console.error("Network or code error:", error.message); }
+      if (isEmpty) {
+        await supabase.from('trade_notes').delete().eq('position_id', posId);
+      } else {
+        await supabase.from('trade_notes').upsert({ 
+          position_id: posId, 
+          note: currentData.note,
+          entry_method: currentData.entryMethod,
+          feedback: currentData.feedback
+        });
+      }
+    } catch (error) { console.error("Error syncing trade note to DB:", error.message); }
+  };
+
+  // List Modification Handlers
+  const handleAddEntryMethod = () => {
+    const trimmed = newEntryMethod.trim();
+    if (trimmed && !entryMethods.includes(trimmed)) {
+      const updated = [...entryMethods, trimmed];
+      setEntryMethods(updated);
+      updateSettingInDB('entry_methods', updated);
+      setNewEntryMethod('');
+    }
+  };
+
+  const handleRemoveEntryMethod = (methodToRemove) => {
+    const updated = entryMethods.filter(m => m !== methodToRemove);
+    setEntryMethods(updated);
+    updateSettingInDB('entry_methods', updated);
+  };
+
+  const handleAddFeedback = () => {
+    const trimmed = newFeedback.trim();
+    if (trimmed && !feedbacks.includes(trimmed)) {
+      const updated = [...feedbacks, trimmed];
+      setFeedbacks(updated);
+      updateSettingInDB('feedbacks', updated);
+      setNewFeedback('');
+    }
+  };
+
+  const handleRemoveFeedback = (feedbackToRemove) => {
+    const updated = feedbacks.filter(f => f !== feedbackToRemove);
+    setFeedbacks(updated);
+    updateSettingInDB('feedbacks', updated);
   };
 
   const handleFileUpload = (event) => {
@@ -260,87 +281,40 @@ export default function App() {
     const isStandard = uploadFormat === 'Standard';
 
     Papa.parse(file, {
-      header: isStandard, 
-      skipEmptyLines: true,
-      transformHeader: function(h) {
-        return isStandard ? h.trim().replace(/^\uFEFF/, '') : h;
-      },
+      header: isStandard, skipEmptyLines: true,
+      transformHeader: function(h) { return isStandard ? h.trim().replace(/^\uFEFF/, '') : h; },
       complete: async (results) => {
         try {
           let dbTrades = [];
 
           if (uploadFormat === 'IB') {
             const rows = results.data;
-            const filteredRows = rows.filter(row => 
-              row[0] === 'Transaction History' && 
-              row[1] === 'Data' && 
-              (row[5] === 'Buy' || row[5] === 'Sell') && 
-              row[6] && row[6].trim().length < 6
-            );
-
+            const filteredRows = rows.filter(row => row[0] === 'Transaction History' && row[1] === 'Data' && (row[5] === 'Buy' || row[5] === 'Sell') && row[6] && row[6].trim().length < 6);
             dbTrades = filteredRows.map(row => {
               const rawDate = row[2].replace(/-/g, '');
               const formattedDate = `${rawDate.substring(0, 4)}-${rawDate.substring(4, 6)}-${rawDate.substring(6, 8)}`;
-              
               let ticker = row[6].trim();
-              const currency = row[9] ? row[9].trim() : '';
-              
-              if (currency === 'CAD' && !ticker.includes('.')) {
-                ticker = `${ticker}.TO`;
-              }
-
-              return {
-                trade_date: formattedDate,
-                ticker: ticker,
-                action: row[5].toLowerCase().trim(),
-                price: parseFloat(row[8]),
-                quantity: Math.abs(parseInt(row[7], 10)) 
-              };
+              if ((row[9] ? row[9].trim() : '') === 'CAD' && !ticker.includes('.')) ticker = `${ticker}.TO`;
+              return { trade_date: formattedDate, ticker: ticker, action: row[5].toLowerCase().trim(), price: parseFloat(row[8]), quantity: Math.abs(parseInt(row[7], 10)) };
             });
-
           } else if (uploadFormat === 'Questrade') {
             alert("Questrade parsing logic coming soon! Please provide a sample file.");
-            setIsUploadModalOpen(false);
-            event.target.value = null;
-            return;
-
+            setIsUploadModalOpen(false); event.target.value = null; return;
           } else {
-            dbTrades = results.data
-              .filter(trade => trade.date && trade.ticker) 
-              .map((trade) => {
+            dbTrades = results.data.filter(trade => trade.date && trade.ticker).map((trade) => {
                 const dateStr = String(trade.date).trim();
-                const formattedDate = `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}`;
-                
-                return { 
-                  trade_date: formattedDate, 
-                  ticker: trade.ticker.trim(), 
-                  action: trade['buy/sell'] ? trade['buy/sell'].toLowerCase().trim() : '', 
-                  price: parseFloat(trade.price), 
-                  quantity: Math.abs(parseInt(trade.quantity, 10)) 
-                };
+                return { trade_date: `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}`, ticker: trade.ticker.trim(), action: trade['buy/sell'] ? trade['buy/sell'].toLowerCase().trim() : '', price: parseFloat(trade.price), quantity: Math.abs(parseInt(trade.quantity, 10)) };
             });
           }
 
-          if (dbTrades.length === 0) {
-            alert(`No valid trades found for the ${uploadFormat} format.`);
-            event.target.value = null;
-            return;
-          }
-
+          if (dbTrades.length === 0) { alert(`No valid trades found.`); event.target.value = null; return; }
           const uniqueDates = [...new Set(dbTrades.map(trade => trade.trade_date))];
           await supabase.from('trades').delete().in('trade_date', uniqueDates);
-          
           const { error } = await supabase.from('trades').insert(dbTrades);
           if (error) throw error;
           
-          alert("Trades successfully synced!"); 
-          fetchTradesFromDB(); 
-          setIsUploadModalOpen(false);
-
-        } catch (error) { 
-          console.error("Upload error:", error);
-          alert("Failed to process the file. Check your browser console for details."); 
-        }
+          alert("Trades successfully synced!"); fetchTradesFromDB(); setIsUploadModalOpen(false);
+        } catch (error) { console.error("Upload error:", error); alert("Failed to process the file."); }
         event.target.value = null; 
       }
     });
@@ -353,7 +327,8 @@ export default function App() {
         const breakEvenPrice = !isClosed ? (stat.avgCost - (stat.realizedPL / stat.qty)) : null;
         const breakEvenPct = !isClosed && stat.currentPrice > 0 ? ((breakEvenPrice / stat.currentPrice) - 1) * 100 : null;
         const currentR = (!isClosed && stat.avgCost > 0 && stat.currentPrice > 0) ? ((stat.currentPrice / stat.avgCost - 1) / 0.02) : null;
-        
+        const notesObj = tradeNotes[stat.id] || {};
+
         return {
           "Ticker": stat.ticker, "Cycle #": stat.positionNum, "Status": isClosed ? "CLOSED" : "OPEN", "Remaining Qty": stat.qty,
           "Avg Entry Price": stat.avgCost.toFixed(2), "Net Realized P/L ($)": stat.realizedPL.toFixed(2), "Open P/L ($)": stat.qty > 0 ? stat.openPL.toFixed(2) : "0.00",
@@ -363,7 +338,10 @@ export default function App() {
           "Gross Profit ($)": stat.grossProfit.toFixed(2), "Gross Loss ($)": stat.grossLoss.toFixed(2), 
           "Win % (>0.5%)": stat.tradesClosed > 0 ? ((stat.winningTrades / stat.tradesClosed) * 100).toFixed(0) + '%' : "N/A",
           "Loss % (<-0.5%)": stat.tradesClosed > 0 ? ((stat.losingTrades / stat.tradesClosed) * 100).toFixed(0) + '%' : "N/A",
-          "Total Trades in Cycle": stat.tradesClosed, "Stop Price": riskPrices[stat.id] || "None", "Trade Journal Notes": tradeNotes[stat.id] || ""
+          "Total Trades in Cycle": stat.tradesClosed, "Stop Price": riskPrices[stat.id] || "None", 
+          "Entry Method": notesObj.entryMethod || "",
+          "Feedback": notesObj.feedback || "",
+          "Trade Journal Notes": notesObj.note || ""
         };
     });
     const csv = Papa.unparse(exportData);
@@ -375,11 +353,9 @@ export default function App() {
 
   const handleFetchOutlook = async () => {
     if (!outlookTicker) return;
-    setOutlookIsFetching(true);
-    setOutlookResults(null);
+    setOutlookIsFetching(true); setOutlookResults(null);
     try {
       const tkr = outlookTicker.toUpperCase().trim();
-      
       const query = `${tkr} AND (product OR launch OR partner OR competitor OR operations)`;
       const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`;
       const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(rssUrl)}`;
@@ -387,48 +363,31 @@ export default function App() {
       const res = await fetch(proxyUrl);
       if (!res.ok) throw new Error("Failed to fetch news");
       const xmlText = await res.text();
-      
-      const parser = new DOMParser();
-      const xmlDoc = parser.parseFromString(xmlText, "text/xml");
+      const parser = new DOMParser(); const xmlDoc = parser.parseFromString(xmlText, "text/xml");
       const itemNodes = xmlDoc.querySelectorAll("item");
       
       let items = Array.from(itemNodes).map(node => ({
         title: node.querySelector("title")?.textContent || "",
         link: node.querySelector("link")?.textContent || "",
-        description: node.querySelector("description")?.textContent || "",
-        publisher: node.querySelector("source")?.textContent || "News"
+        description: node.querySelector("description")?.textContent || ""
       }));
-      
       items = filterOperationalNews(items);
       
-      const uniqueItems = [];
-      const seenTitles = new Set();
+      const uniqueItems = []; const seenTitles = new Set();
       for (let item of items) {
           const shortTitle = item.title.substring(0, 30).toLowerCase();
-          if (!seenTitles.has(shortTitle)) {
-            seenTitles.add(shortTitle);
-            uniqueItems.push(item);
-          }
+          if (!seenTitles.has(shortTitle)) { seenTitles.add(shortTitle); uniqueItems.push(item); }
       }
 
       const finalNews = uniqueItems.slice(0, 10); 
-      const analysis = generateOutlookAnalysis(tkr, finalNews);
-
-      setOutlookResults({
-        news: finalNews,
-        analysis: analysis
-      });
-
-    } catch(err) {
-      console.error(err);
-      setOutlookResults({ error: true });
-    }
+      setOutlookResults({ news: finalNews, analysis: generateOutlookAnalysis(tkr, finalNews) });
+    } catch(err) { setOutlookResults({ error: true }); }
     setOutlookIsFetching(false);
   };
 
   useEffect(() => {
     if (trades.length === 0) {
-      setTickerStats({}); setDayOfWeekStats({}); setMonthlyStats({}); setAnalyzedTrades([]); 
+      setTickerStats({}); setMonthlyStats({}); setAnalyzedTrades([]); 
       setAdvancedStats({ maxDD: 0, maxWinStreak: 0, maxLossStreak: 0, avgWinDays: 0, avgLossDays: 0 });
       return;
     }
@@ -464,11 +423,11 @@ export default function App() {
         if (s.qty === 0) { s.avgCost = 0; s.totalCost = 0; }
         s.tradesClosed++;
         
-        if (pl > 0) { s.grossProfit += pl; } 
-        if (pl < 0) { s.grossLoss += Math.abs(pl); }
+        if (pl > 0) s.grossProfit += pl; 
+        if (pl < 0) s.grossLoss += Math.abs(pl); 
         
-        if (plPct > 0.005) { s.winningTrades++; } 
-        else if (plPct < -0.005) { s.losingTrades++; }
+        if (plPct > 0.005) s.winningTrades++; 
+        else if (plPct < -0.005) s.losingTrades++;
 
         realizedEvents.push({ date: tradeDate, pl: pl, plPct: plPct }); 
 
@@ -476,18 +435,17 @@ export default function App() {
         if (!mStats[monthKey]) mStats[monthKey] = { monthKey, realizedPL: 0, grossProfit: 0, grossLoss: 0, tradesClosed: 0, winningTrades: 0, losingTrades: 0 };
         mStats[monthKey].realizedPL += pl; mStats[monthKey].tradesClosed++;
         
-        if (pl > 0) { mStats[monthKey].grossProfit += pl; } 
-        if (pl < 0) { mStats[monthKey].grossLoss += Math.abs(pl); }
+        if (pl > 0) mStats[monthKey].grossProfit += pl; 
+        if (pl < 0) mStats[monthKey].grossLoss += Math.abs(pl); 
         
-        if (plPct > 0.005) { mStats[monthKey].winningTrades++; } 
-        else if (plPct < -0.005) { mStats[monthKey].losingTrades++; }
+        if (plPct > 0.005) mStats[monthKey].winningTrades++; 
+        else if (plPct < -0.005) mStats[monthKey].losingTrades++;
 
         let qtyToClose = trade.quantity;
         while (qtyToClose > 0 && s.openLots.length > 0) {
           let lot = s.openLots[0]; let closeQty = Math.min(qtyToClose, lot.qty); let daysHeld = (tradeDate - lot.date) / (1000 * 60 * 60 * 24);
           s.totalDaysHeld += (daysHeld * closeQty); s.sharesClosed += closeQty;
           
-          // Apply >0.5% and <-0.5% filters for Average Hold computations
           if (plPct > 0.005) { s.winDays += (daysHeld * closeQty); s.winShares += closeQty; } 
           else if (plPct < -0.005) { s.lossDays += (daysHeld * closeQty); s.lossShares += closeQty; }
           
@@ -505,13 +463,8 @@ export default function App() {
       cumulative += e.pl; if (cumulative > peak) peak = cumulative;
       let drawdown = peak - cumulative; if (drawdown > maxDD) maxDD = drawdown;
       
-      // Update Streaks strictly off >0.5% and <-0.5%. Ignore scratch entirely.
-      if (e.plPct > 0.005) { 
-          curWin++; maxWinStreak = Math.max(maxWinStreak, curWin); curLoss = 0; 
-      } else if (e.plPct < -0.005) { 
-          curLoss++; maxLossStreak = Math.max(maxLossStreak, curLoss); curWin = 0; 
-      }
-      // If scratch trade (-0.5% to 0.5%), do nothing: don't break the streak, don't increment.
+      if (e.plPct > 0.005) { curWin++; maxWinStreak = Math.max(maxWinStreak, curWin); curLoss = 0; } 
+      else if (e.plPct < -0.005) { curLoss++; maxLossStreak = Math.max(maxLossStreak, curLoss); curWin = 0; }
     });
 
     let totalWinDays = 0, totalWinShares = 0; let totalLossDays = 0, totalLossShares = 0;
@@ -625,7 +578,6 @@ export default function App() {
   const grossLoss = Math.abs(losingPositionsForProfit.reduce((sum, stat) => sum + stat.realizedPL, 0));
   const profitFactor = grossLoss === 0 ? (grossProfit > 0 ? 'MAX' : '0.00') : (grossProfit / grossLoss).toFixed(2);
   
-  // Calculate Global Win Rate and Loss Rate (Filtered to +/- 0.5%)
   const closedCycles = statsArray.filter(stat => stat.totalClosedCost > 0);
   const hardWins = closedCycles.filter(stat => (stat.realizedPL / stat.totalClosedCost) > 0.005);
   const hardLosses = closedCycles.filter(stat => (stat.realizedPL / stat.totalClosedCost) < -0.005);
@@ -633,9 +585,7 @@ export default function App() {
   const winRate = closedCycles.length === 0 ? '0.0' : ((hardWins.length / closedCycles.length) * 100).toFixed(1);
   const lossRate = closedCycles.length === 0 ? '0.0' : ((hardLosses.length / closedCycles.length) * 100).toFixed(1);
 
-  // Calculate Average Win P/L % and Loss P/L % based on completed segments
   const cyclePLPcts = closedCycles.map(stat => (stat.realizedPL / stat.totalClosedCost) * 100);
-    
   const winPcts = cyclePLPcts.filter(pct => pct > 0.5);
   const lossPcts = cyclePLPcts.filter(pct => pct < -0.5);
 
@@ -727,10 +677,17 @@ export default function App() {
             Calculator
           </button>
 
-          {/* COMPANY OUTLOOK BUTTON */}
           <button onClick={() => setIsOutlookModalOpen(true)} style={{ padding: '8px 12px', backgroundColor: '#f57c00', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
             Company Outlook
+          </button>
+
+          <button onClick={() => setIsEntryMethodModalOpen(true)} style={{ padding: '8px 12px', backgroundColor: '#8e24aa', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            Entry Methods
+          </button>
+          
+          <button onClick={() => setIsFeedbackModalOpen(true)} style={{ padding: '8px 12px', backgroundColor: '#00897b', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            Feedback Tags
           </button>
 
           <button onClick={handleExportCSV} style={{ padding: '8px 12px', backgroundColor: '#1565c0', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -767,6 +724,54 @@ export default function App() {
           <button onClick={() => setIsAuthenticated(false)} style={{ padding: '6px 12px', backgroundColor: '#f44336', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>Lock</button>
         </div>
       </div>
+
+      {/* ENTRY METHOD CONFIG MODAL */}
+      {isEntryMethodModalOpen && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ backgroundColor: '#fff', padding: '25px', borderRadius: '8px', width: '380px', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '2px solid #eee', paddingBottom: '10px' }}>
+              <h3 style={{ margin: 0, color: '#333' }}>Manage Entry Methods</h3>
+              <button onClick={() => setIsEntryMethodModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#888' }}>&times;</button>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '15px' }}>
+              <input type="text" value={newEntryMethod} onChange={(e) => setNewEntryMethod(e.target.value)} placeholder="E.g. Breakout, Pullback..." style={{ flex: 1, padding: '8px', border: '1px solid #ccc', borderRadius: '4px', outline: 'none' }} />
+              <button onClick={handleAddEntryMethod} style={{ padding: '8px 12px', backgroundColor: '#8e24aa', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Add</button>
+            </div>
+            <ul style={{ listStyle: 'none', padding: 0, margin: 0, maxHeight: '200px', overflowY: 'auto' }}>
+              {entryMethods.map((method, idx) => (
+                <li key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', backgroundColor: '#f5f5f5', marginBottom: '5px', borderRadius: '4px' }}>
+                  <span style={{ fontSize: '14px', color: '#333' }}>{method}</span>
+                  <button onClick={() => handleRemoveEntryMethod(method)} style={{ background: 'none', border: 'none', color: '#d32f2f', cursor: 'pointer', fontSize: '16px', fontWeight: 'bold' }}>&times;</button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+
+      {/* FEEDBACK CONFIG MODAL */}
+      {isFeedbackModalOpen && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ backgroundColor: '#fff', padding: '25px', borderRadius: '8px', width: '380px', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '2px solid #eee', paddingBottom: '10px' }}>
+              <h3 style={{ margin: 0, color: '#333' }}>Manage Feedback Tags</h3>
+              <button onClick={() => setIsFeedbackModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#888' }}>&times;</button>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '15px' }}>
+              <input type="text" value={newFeedback} onChange={(e) => setNewFeedback(e.target.value)} placeholder="E.g. FOMO, Exited Early..." style={{ flex: 1, padding: '8px', border: '1px solid #ccc', borderRadius: '4px', outline: 'none' }} />
+              <button onClick={handleAddFeedback} style={{ padding: '8px 12px', backgroundColor: '#00897b', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Add</button>
+            </div>
+            <ul style={{ listStyle: 'none', padding: 0, margin: 0, maxHeight: '200px', overflowY: 'auto' }}>
+              {feedbacks.map((fb, idx) => (
+                <li key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', backgroundColor: '#f5f5f5', marginBottom: '5px', borderRadius: '4px' }}>
+                  <span style={{ fontSize: '14px', color: '#333' }}>{fb}</span>
+                  <button onClick={() => handleRemoveFeedback(fb)} style={{ background: 'none', border: 'none', color: '#d32f2f', cursor: 'pointer', fontSize: '16px', fontWeight: 'bold' }}>&times;</button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
 
       {/* OUTLOOK MODAL */}
       {isOutlookModalOpen && (
@@ -1157,7 +1162,6 @@ export default function App() {
                 const displayName = totalTickerPositions > 1 ? `${stat.ticker} (Active Trade #${stat.positionNum})` : stat.ticker;
                 const today = new Date(); let totalOpenDays = 0;
                 stat.openLots.forEach(lot => { const days = (today - lot.date) / (1000 * 60 * 60 * 24); totalOpenDays += Math.max(0, days) * lot.qty; });
-                const currentDaysHeld = stat.qty > 0 ? (totalOpenDays / stat.qty).toFixed(1) : 0;
                 const stopPrice = parseFloat(riskPrices[stat.id]);
                 const openRisk = !isNaN(stopPrice) ? (stat.avgCost - stopPrice) * stat.qty : null;
                 const riskPct = !isNaN(stopPrice) && stat.avgCost > 0 ? (((stat.avgCost - stopPrice) / stat.avgCost) * 100).toFixed(2) : null;
@@ -1169,6 +1173,8 @@ export default function App() {
                 
                 const indPosSizePct = parsedEquity > 0 ? (((stat.qty * stat.avgCost) / parsedEquity) * 100).toFixed(2) + '%' : '--';
                 const currentR = (stat.avgCost > 0 && stat.currentPrice > 0) ? ((stat.currentPrice / stat.avgCost - 1) / 0.02).toFixed(2) : null;
+
+                const currentNoteObj = tradeNotes[stat.id] || { note: '', entryMethod: '', feedback: '' };
 
                 return (
                   <div key={stat.id} style={{ marginTop: '20px', padding: '12px', backgroundColor: '#e3f2fd', borderRadius: '8px', border: '1px solid #90caf9' }}>
@@ -1200,8 +1206,32 @@ export default function App() {
                       </div>
                     </div>
                     <div style={{ marginTop: '12px' }}>
-                      <div style={{ fontSize: '10px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold', marginBottom: '4px' }}>Trade Notes</div>
-                      <textarea value={tradeNotes[stat.id] || ''} onChange={(e) => setTradeNotes({...tradeNotes, [stat.id]: e.target.value})} onBlur={(e) => syncTradeNote(stat.id, e.target.value)} placeholder="Add notes, thesis, or reflections for this trade cycle..." style={{ width: '100%', minHeight: '40px', padding: '8px', borderRadius: '6px', border: '1px solid #bbdefb', boxSizing: 'border-box', fontFamily: 'inherit', fontSize: '13px', resize: 'vertical' }} />
+                      <div style={{ display: 'flex', gap: '10px', marginBottom: '8px' }}>
+                        <select 
+                          value={currentNoteObj.entryMethod || ''} 
+                          onChange={(e) => handleNoteDataChange(stat.id, 'entryMethod', e.target.value)}
+                          onBlur={() => syncTradeNoteData(stat.id)}
+                          style={{ padding: '6px', borderRadius: '4px', border: '1px solid #bbdefb', outline: 'none', fontSize: '13px' }}>
+                          <option value="">-- Select Entry Method --</option>
+                          {entryMethods.map(m => <option key={m} value={m}>{m}</option>)}
+                        </select>
+                        
+                        <select 
+                          value={currentNoteObj.feedback || ''} 
+                          onChange={(e) => handleNoteDataChange(stat.id, 'feedback', e.target.value)}
+                          onBlur={() => syncTradeNoteData(stat.id)}
+                          style={{ padding: '6px', borderRadius: '4px', border: '1px solid #bbdefb', outline: 'none', fontSize: '13px' }}>
+                          <option value="">-- Select Feedback Tag --</option>
+                          {feedbacks.map(f => <option key={f} value={f}>{f}</option>)}
+                        </select>
+                      </div>
+
+                      <textarea 
+                        value={currentNoteObj.note || ''} 
+                        onChange={(e) => handleNoteDataChange(stat.id, 'note', e.target.value)} 
+                        onBlur={() => syncTradeNoteData(stat.id)} 
+                        placeholder="Add notes, thesis, or reflections for this trade cycle..." 
+                        style={{ width: '100%', minHeight: '60px', padding: '8px', borderRadius: '6px', border: '1px solid #bbdefb', boxSizing: 'border-box', fontFamily: 'inherit', fontSize: '13px', resize: 'vertical' }} />
                     </div>
                   </div>
                 );
@@ -1214,7 +1244,8 @@ export default function App() {
               .map((stat) => {
                 const totalTickerPositions = Object.values(tickerStats).filter(s => s.ticker === stat.ticker).length;
                 const displayName = totalTickerPositions > 1 ? `${stat.ticker} (Trade #${stat.positionNum})` : stat.ticker;
-                
+                const currentNoteObj = tradeNotes[stat.id] || { note: '', entryMethod: '', feedback: '' };
+
                 return (
                   <div key={stat.id} style={{ marginTop: '20px', padding: '12px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0' }}>
                     <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: '#333' }}>{displayName} Closed Position Analytics</h4>
@@ -1233,8 +1264,32 @@ export default function App() {
                       </div>
                     </div>
                     <div style={{ marginTop: '12px' }}>
-                      <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold', marginBottom: '4px' }}>Trade Notes</div>
-                      <textarea value={tradeNotes[stat.id] || ''} onChange={(e) => setTradeNotes({...tradeNotes, [stat.id]: e.target.value})} onBlur={(e) => syncTradeNote(stat.id, e.target.value)} placeholder="Add notes, thesis, or reflections for this trade cycle..." style={{ width: '100%', minHeight: '40px', padding: '8px', borderRadius: '6px', border: '1px solid #ccc', boxSizing: 'border-box', fontFamily: 'inherit', fontSize: '13px', resize: 'vertical' }} />
+                      <div style={{ display: 'flex', gap: '10px', marginBottom: '8px' }}>
+                        <select 
+                          value={currentNoteObj.entryMethod || ''} 
+                          onChange={(e) => handleNoteDataChange(stat.id, 'entryMethod', e.target.value)}
+                          onBlur={() => syncTradeNoteData(stat.id)}
+                          style={{ padding: '6px', borderRadius: '4px', border: '1px solid #ccc', outline: 'none', fontSize: '13px' }}>
+                          <option value="">-- Select Entry Method --</option>
+                          {entryMethods.map(m => <option key={m} value={m}>{m}</option>)}
+                        </select>
+                        
+                        <select 
+                          value={currentNoteObj.feedback || ''} 
+                          onChange={(e) => handleNoteDataChange(stat.id, 'feedback', e.target.value)}
+                          onBlur={() => syncTradeNoteData(stat.id)}
+                          style={{ padding: '6px', borderRadius: '4px', border: '1px solid #ccc', outline: 'none', fontSize: '13px' }}>
+                          <option value="">-- Select Feedback Tag --</option>
+                          {feedbacks.map(f => <option key={f} value={f}>{f}</option>)}
+                        </select>
+                      </div>
+
+                      <textarea 
+                        value={currentNoteObj.note || ''} 
+                        onChange={(e) => handleNoteDataChange(stat.id, 'note', e.target.value)} 
+                        onBlur={() => syncTradeNoteData(stat.id)} 
+                        placeholder="Add notes, thesis, or reflections for this trade cycle..." 
+                        style={{ width: '100%', minHeight: '60px', padding: '8px', borderRadius: '6px', border: '1px solid #ccc', boxSizing: 'border-box', fontFamily: 'inherit', fontSize: '13px', resize: 'vertical' }} />
                     </div>
                   </div>
                 );

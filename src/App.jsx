@@ -360,7 +360,9 @@ export default function App() {
           "Break-Even Price": breakEvenPrice !== null ? breakEvenPrice.toFixed(2) : "N/A",
           "Break-Even %": breakEvenPct !== null ? breakEvenPct.toFixed(2) + '%' : "N/A",
           "Current R": currentR !== null ? currentR.toFixed(2) : "N/A",
-          "Gross Profit ($)": stat.grossProfit.toFixed(2), "Gross Loss ($)": stat.grossLoss.toFixed(2), "Win %": stat.tradesClosed > 0 ? ((stat.winningTrades / stat.tradesClosed) * 100).toFixed(0) + '%' : "N/A",
+          "Gross Profit ($)": stat.grossProfit.toFixed(2), "Gross Loss ($)": stat.grossLoss.toFixed(2), 
+          "Win % (>0.5%)": stat.tradesClosed > 0 ? ((stat.winningTrades / stat.tradesClosed) * 100).toFixed(0) + '%' : "N/A",
+          "Loss % (<-0.5%)": stat.tradesClosed > 0 ? ((stat.losingTrades / stat.tradesClosed) * 100).toFixed(0) + '%' : "N/A",
           "Total Trades in Cycle": stat.tradesClosed, "Stop Price": riskPrices[stat.id] || "None", "Trade Journal Notes": tradeNotes[stat.id] || ""
         };
     });
@@ -454,19 +456,31 @@ export default function App() {
         s.qty += trade.quantity; s.totalCost += (trade.price * trade.quantity); s.avgCost = s.qty > 0 ? s.totalCost / s.qty : 0;
         s.openLots.push({ date: tradeDate, qty: trade.quantity });
       } else if (trade['buy/sell'] === 'sell') {
-        const closedCost = s.avgCost * trade.quantity; const pl = trade.quantity * (trade.price - s.avgCost);
+        const closedCost = s.avgCost * trade.quantity; 
+        const pl = trade.quantity * (trade.price - s.avgCost);
+        const plPct = s.avgCost > 0 ? (trade.price - s.avgCost) / s.avgCost : 0;
+        
         s.realizedPL += pl; s.totalClosedCost += closedCost; s.qty -= trade.quantity; s.totalCost -= closedCost;
         if (s.qty === 0) { s.avgCost = 0; s.totalCost = 0; }
         s.tradesClosed++;
-        if (pl > 0) { s.grossProfit += pl; s.winningTrades++; } else if (pl < 0) { s.grossLoss += Math.abs(pl); s.losingTrades++; }
+        
+        if (pl > 0) { s.grossProfit += pl; } 
+        if (pl < 0) { s.grossLoss += Math.abs(pl); }
+        
+        if (plPct > 0.005) { s.winningTrades++; } 
+        else if (plPct < -0.005) { s.losingTrades++; }
 
-        realizedEvents.push({ date: tradeDate, pl: pl }); 
+        realizedEvents.push({ date: tradeDate, pl: pl, plPct: plPct }); 
 
         const yyyy = tradeDate.getFullYear(); const mm = String(tradeDate.getMonth() + 1).padStart(2, '0'); const monthKey = `${yyyy}-${mm}`; 
         if (!mStats[monthKey]) mStats[monthKey] = { monthKey, realizedPL: 0, grossProfit: 0, grossLoss: 0, tradesClosed: 0, winningTrades: 0, losingTrades: 0 };
         mStats[monthKey].realizedPL += pl; mStats[monthKey].tradesClosed++;
-        if (pl > 0) { mStats[monthKey].grossProfit += pl; mStats[monthKey].winningTrades++; } 
-        else if (pl < 0) { mStats[monthKey].grossLoss += Math.abs(pl); mStats[monthKey].losingTrades++; }
+        
+        if (pl > 0) { mStats[monthKey].grossProfit += pl; } 
+        if (pl < 0) { mStats[monthKey].grossLoss += Math.abs(pl); }
+        
+        if (plPct > 0.005) { mStats[monthKey].winningTrades++; } 
+        else if (plPct < -0.005) { mStats[monthKey].losingTrades++; }
 
         let qtyToClose = trade.quantity;
         while (qtyToClose > 0 && s.openLots.length > 0) {
@@ -486,8 +500,9 @@ export default function App() {
     realizedEvents.forEach(e => {
       cumulative += e.pl; if (cumulative > peak) peak = cumulative;
       let drawdown = peak - cumulative; if (drawdown > maxDD) maxDD = drawdown;
-      if (e.pl > 0) { curWin++; maxWinStreak = Math.max(maxWinStreak, curWin); curLoss = 0; } 
-      else if (e.pl < 0) { curLoss++; maxLossStreak = Math.max(maxLossStreak, curLoss); curWin = 0; }
+      if (e.plPct > 0.005) { curWin++; maxWinStreak = Math.max(maxWinStreak, curWin); curLoss = 0; } 
+      else if (e.plPct < -0.005) { curLoss++; maxLossStreak = Math.max(maxLossStreak, curLoss); curWin = 0; }
+      else { curWin = 0; curLoss = 0; } // Ignore scratch trades for continuing streaks
     });
 
     let totalWinDays = 0, totalWinShares = 0; let totalLossDays = 0, totalLossShares = 0;
@@ -593,20 +608,24 @@ export default function App() {
   const parsedEquity = parseFloat(accountEquity) || 0;
 
   const statsArray = Object.values(tickerStats);
-  const winningPositions = statsArray.filter(stat => stat.realizedPL > 0);
-  const losingPositions = statsArray.filter(stat => stat.realizedPL < 0);
+  const winningPositionsForProfit = statsArray.filter(stat => stat.realizedPL > 0);
+  const losingPositionsForProfit = statsArray.filter(stat => stat.realizedPL < 0);
   
   const totalRealizedPL = statsArray.reduce((sum, stat) => sum + stat.realizedPL, 0);
-  const grossProfit = winningPositions.reduce((sum, stat) => sum + stat.realizedPL, 0);
-  const grossLoss = Math.abs(losingPositions.reduce((sum, stat) => sum + stat.realizedPL, 0));
-  
+  const grossProfit = winningPositionsForProfit.reduce((sum, stat) => sum + stat.realizedPL, 0);
+  const grossLoss = Math.abs(losingPositionsForProfit.reduce((sum, stat) => sum + stat.realizedPL, 0));
   const profitFactor = grossLoss === 0 ? (grossProfit > 0 ? 'MAX' : '0.00') : (grossProfit / grossLoss).toFixed(2);
-  const winRate = statsArray.length === 0 ? '0.0' : ((winningPositions.length / (winningPositions.length + losingPositions.length)) * 100).toFixed(1);
+  
+  // Calculate Global Win Rate and Loss Rate (Filtered to +/- 0.5%)
+  const closedCycles = statsArray.filter(stat => stat.totalClosedCost > 0);
+  const hardWins = closedCycles.filter(stat => (stat.realizedPL / stat.totalClosedCost) > 0.005);
+  const hardLosses = closedCycles.filter(stat => (stat.realizedPL / stat.totalClosedCost) < -0.005);
+  
+  const winRate = closedCycles.length === 0 ? '0.0' : ((hardWins.length / closedCycles.length) * 100).toFixed(1);
+  const lossRate = closedCycles.length === 0 ? '0.0' : ((hardLosses.length / closedCycles.length) * 100).toFixed(1);
 
   // Calculate Average Win P/L % and Loss P/L % based on completed segments
-  const cyclePLPcts = statsArray
-    .filter(stat => stat.totalClosedCost > 0)
-    .map(stat => (stat.realizedPL / stat.totalClosedCost) * 100);
+  const cyclePLPcts = closedCycles.map(stat => (stat.realizedPL / stat.totalClosedCost) * 100);
     
   const winPcts = cyclePLPcts.filter(pct => pct > 0.5);
   const lossPcts = cyclePLPcts.filter(pct => pct < -0.5);
@@ -923,9 +942,12 @@ export default function App() {
                 .map(stat => {
                 const totalTickerPositions = Object.values(tickerStats).filter(s => s.ticker === stat.ticker).length;
                 const displayName = totalTickerPositions > 1 ? `${stat.ticker} (Trade #${stat.positionNum})` : stat.ticker;
+                
                 const posWinRate = stat.tradesClosed > 0 ? ((stat.winningTrades / stat.tradesClosed) * 100).toFixed(0) : 0;
+                const posLossRate = stat.tradesClosed > 0 ? ((stat.losingTrades / stat.tradesClosed) * 100).toFixed(0) : 0;
                 const posPF = stat.grossLoss === 0 ? (stat.grossProfit > 0 ? 'MAX' : '0.0') : (stat.grossProfit / stat.grossLoss).toFixed(1);
                 const posAvgDays = stat.sharesClosed > 0 ? (stat.totalDaysHeld / stat.sharesClosed).toFixed(1) : 0;
+                
                 const stopPrice = parseFloat(riskPrices[stat.id]);
                 const openRisk = !isNaN(stopPrice) ? (stat.avgCost - stopPrice) * stat.qty : null;
                 const riskPct = !isNaN(stopPrice) && stat.avgCost > 0 ? (((stat.avgCost - stopPrice) / stat.avgCost) * 100).toFixed(2) : null;
@@ -978,7 +1000,7 @@ export default function App() {
                     )}
                     {stat.tradesClosed > 0 && (
                       <div style={{ backgroundColor: '#f5f5f5', padding: '6px', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#555', fontWeight: 'bold', marginTop: '8px' }}>
-                        <span>WIN: {posWinRate}%</span><span>PF: {posPF}</span><span>HELD: {posAvgDays}d</span>
+                        <span>W/L: {posWinRate}% / {posLossRate}%</span><span>PF: {posPF}</span><span>HELD: {posAvgDays}d</span>
                       </div>
                     )}
                   </div>
@@ -1032,9 +1054,13 @@ export default function App() {
                 <div style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Profit Factor</div>
                 <div style={{ fontSize: '20px', fontWeight: 'bold', color: profitFactor > 1 || profitFactor === 'MAX' ? '#2e7d32' : '#d32f2f' }}>{profitFactor}</div>
               </div>
-              <div title="Percentage of closed trades that resulted in a profit." style={{ flex: 1, minWidth: '120px', padding: '12px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
-                <div style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Win Rate</div>
-                <div style={{ fontSize: '20px', fontWeight: 'bold', color: winRate >= 50 ? '#2e7d32' : '#d32f2f' }}>{winRate}%</div>
+              <div title="Percentage of closed cycles that resulted in >0.5% profit or <-0.5% loss." style={{ flex: 1, minWidth: '140px', padding: '12px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
+                <div style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Win / Loss Rate</div>
+                <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#333' }}>
+                  <span style={{ color: winRate >= 50 ? '#2e7d32' : '#333' }}>{winRate}%</span>
+                  <span style={{ fontSize: '16px', color: '#ccc', margin: '0 6px' }}>|</span>
+                  <span style={{ color: '#d32f2f' }}>{lossRate}%</span>
+                </div>
               </div>
               <div title="Total realized profit minus total realized loss." style={{ flex: 1, minWidth: '140px', padding: '12px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
                 <div style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Net Realized P/L</div>
@@ -1087,7 +1113,7 @@ export default function App() {
                 <div style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Avg Hold (Losses)</div>
                 <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#d32f2f' }}>{advancedStats.avgLossDays} Days</div>
               </div>
-              <div title="Longest consecutive streak of winning trades (W) and losing trades (L)." style={{ flex: 1, minWidth: '140px', padding: '12px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
+              <div title="Longest consecutive streak of winning trades (W) and losing trades (L) exceeding ±0.5%." style={{ flex: 1, minWidth: '140px', padding: '12px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
                 <div style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Max Streaks</div>
                 <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#333' }}>
                   <span style={{ color: '#2e7d32' }}>{advancedStats.maxWinStreak}W</span> / <span style={{ color: '#d32f2f' }}>{advancedStats.maxLossStreak}L</span>
@@ -1222,7 +1248,7 @@ export default function App() {
                   <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Open P/L</th>
                   <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Break-Even</th>
                   <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Current R</th>
-                  <th style={{ padding: '12px 10px', textAlign: 'center', color: '#555' }}>Win % / PF</th>
+                  <th style={{ padding: '12px 10px', textAlign: 'center', color: '#555' }}>W/L % / PF</th>
                   <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Days Held</th>
                   <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Stop Price</th>
                   <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Open Risk</th>
@@ -1238,7 +1264,9 @@ export default function App() {
                     const totalTickerPositions = Object.values(tickerStats).filter(s => s.ticker === stat.ticker).length;
                     const displayName = totalTickerPositions > 1 ? `${stat.ticker} (#${stat.positionNum})` : stat.ticker;
                     const isClosed = stat.qty === 0;
+                    
                     const posWinRate = stat.tradesClosed > 0 ? ((stat.winningTrades / stat.tradesClosed) * 100).toFixed(0) + '%' : '--';
+                    const posLossRate = stat.tradesClosed > 0 ? ((stat.losingTrades / stat.tradesClosed) * 100).toFixed(0) + '%' : '--';
                     const posPF = stat.grossLoss === 0 ? (stat.grossProfit > 0 ? 'MAX' : '--') : (stat.grossProfit / stat.grossLoss).toFixed(1);
                     
                     let displayDaysHeld = '--';
@@ -1270,7 +1298,7 @@ export default function App() {
                         <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.openPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{isClosed ? '--' : (stat.openPL >= 0 ? '+' : '') + '$' + stat.openPL.toFixed(2)}</td>
                         <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333', fontWeight: 'bold' }}>{isClosed ? '--' : '$' + breakEvenPrice.toFixed(2) + breakEvenPctStr}</td>
                         <td style={{ padding: '12px 10px', textAlign: 'right', color: currentR > 0 ? '#2e7d32' : (currentR < 0 ? '#d32f2f' : '#333'), fontWeight: 'bold' }}>{isClosed ? '--' : (currentR !== null ? currentR.toFixed(2) + 'R' : '--')}</td>
-                        <td style={{ padding: '12px 10px', textAlign: 'center', color: '#555' }}>{posWinRate} / {posPF}</td>
+                        <td style={{ padding: '12px 10px', textAlign: 'center', color: '#555' }}>{posWinRate}/{posLossRate} / {posPF}</td>
                         <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333' }}>{displayDaysHeld}</td>
                         <td style={{ padding: '8px 10px', textAlign: 'right' }}>
                           {isClosed ? '--' : (
@@ -1299,6 +1327,7 @@ export default function App() {
                     <th style={{ padding: '12px 10px', textAlign: 'left', color: '#555' }}>Month</th>
                     <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Trades Closed</th>
                     <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Win Rate</th>
+                    <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Loss Rate</th>
                     <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Profit Factor</th>
                     <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Gross Profit</th>
                     <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Gross Loss</th>
@@ -1310,12 +1339,15 @@ export default function App() {
                     .sort((a, b) => b.monthKey.localeCompare(a.monthKey))
                     .map((stat, index) => {
                       const monthWinRate = stat.tradesClosed > 0 ? ((stat.winningTrades / stat.tradesClosed) * 100).toFixed(1) + '%' : '0.0%';
+                      const monthLossRate = stat.tradesClosed > 0 ? ((stat.losingTrades / stat.tradesClosed) * 100).toFixed(1) + '%' : '0.0%';
                       const monthPF = stat.grossLoss === 0 ? (stat.grossProfit > 0 ? 'MAX' : '0.00') : (stat.grossProfit / stat.grossLoss).toFixed(2);
+                      
                       return (
                         <tr key={stat.monthKey} style={{ borderBottom: '1px solid #eee', backgroundColor: index % 2 === 0 ? '#fff' : '#fafafa', transition: 'background-color 0.2s' }} onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f1f8ff'} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = index % 2 === 0 ? '#fff' : '#fafafa'}>
                           <td style={{ padding: '12px 10px', fontWeight: 'bold', fontSize: '15px' }}>{stat.monthKey}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 'bold' }}>{stat.tradesClosed}</td>
-                          <td style={{ padding: '12px 10px', textAlign: 'right', color: parseFloat(monthWinRate) >= 50 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{monthWinRate}</td>
+                          <td style={{ padding: '12px 10px', textAlign: 'right', color: parseFloat(monthWinRate) >= 50 ? '#2e7d32' : '#333', fontWeight: 'bold' }}>{monthWinRate}</td>
+                          <td style={{ padding: '12px 10px', textAlign: 'right', color: '#d32f2f', fontWeight: 'bold' }}>{monthLossRate}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: monthPF > 1 || monthPF === 'MAX' ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{monthPF}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: '#2e7d32' }}>+${stat.grossProfit.toFixed(2)}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: '#d32f2f' }}>-${stat.grossLoss.toFixed(2)}</td>

@@ -603,6 +603,17 @@ export default function App() {
   const profitFactor = grossLoss === 0 ? (grossProfit > 0 ? 'MAX' : '0.00') : (grossProfit / grossLoss).toFixed(2);
   const winRate = statsArray.length === 0 ? '0.0' : ((winningPositions.length / (winningPositions.length + losingPositions.length)) * 100).toFixed(1);
 
+  // Calculate Average Win P/L % and Loss P/L % based on completed segments
+  const cyclePLPcts = statsArray
+    .filter(stat => stat.totalClosedCost > 0)
+    .map(stat => (stat.realizedPL / stat.totalClosedCost) * 100);
+    
+  const winPcts = cyclePLPcts.filter(pct => pct > 0.5);
+  const lossPcts = cyclePLPcts.filter(pct => pct < -0.5);
+
+  const avgWinPLPct = winPcts.length > 0 ? (winPcts.reduce((a, b) => a + b, 0) / winPcts.length) : 0;
+  const avgLossPLPct = lossPcts.length > 0 ? (lossPcts.reduce((a, b) => a + b, 0) / lossPcts.length) : 0;
+
   const globalTotalDaysHeld = statsArray.reduce((sum, stat) => sum + stat.totalDaysHeld, 0);
   const globalSharesClosed = statsArray.reduce((sum, stat) => sum + stat.sharesClosed, 0);
   const globalAvgDaysHeld = globalSharesClosed > 0 ? (globalTotalDaysHeld / globalSharesClosed).toFixed(1) : 0;
@@ -1053,6 +1064,17 @@ export default function App() {
                 <div style={{ fontSize: '11px', color: '#c62828', textTransform: 'uppercase', fontWeight: 'bold' }}>Max Drawdown</div>
                 <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#c62828' }}>-${Math.abs(advancedStats.maxDD).toFixed(2)}</div>
               </div>
+              
+              <div title="Average percentage profit across winning cycles (P/L > 0.5%)." style={{ flex: 1, minWidth: '140px', padding: '12px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
+                <div style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Avg Win P/L%</div>
+                <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#2e7d32' }}>+{avgWinPLPct.toFixed(2)}%</div>
+              </div>
+              
+              <div title="Average percentage loss across losing cycles (P/L < -0.5%)." style={{ flex: 1, minWidth: '140px', padding: '12px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
+                <div style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Avg Loss P/L%</div>
+                <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#d32f2f' }}>{avgLossPLPct === 0 ? '0.00' : avgLossPLPct.toFixed(2)}%</div>
+              </div>
+
               <div title="Average number of days positions were held before closing." style={{ flex: 1, minWidth: '120px', padding: '12px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', cursor: 'help' }}>
                 <div style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Avg Hold (Overall)</div>
                 <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#333' }}>{globalAvgDaysHeld} Days</div>

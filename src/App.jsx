@@ -83,6 +83,10 @@ export default function App() {
   const [historyFilter, setHistoryFilter] = useState('All');
   const [portfolioFilter, setPortfolioFilter] = useState('All');
   
+  // --- New Table Specific Filters ---
+  const [tablePositionFilter, setTablePositionFilter] = useState('');
+  const [tableStatusFilter, setTableStatusFilter] = useState('All');
+
   const [riskPrices, setRiskPrices] = useState({});
   const [tradeNotes, setTradeNotes] = useState({});
   const [accountEquity, setAccountEquity] = useState('');
@@ -1412,6 +1416,34 @@ export default function App() {
           {/* TABLE TAB                 */}
           {/* ========================================= */}
           <div style={{ display: activeTab === 'table' ? 'block' : 'none', overflowX: 'auto' }}>
+            
+            {/* --- NEW TABLE FILTERS --- */}
+            <div style={{ display: 'flex', gap: '15px', marginBottom: '15px', padding: '10px', backgroundColor: '#f8f9fa', borderRadius: '6px', border: '1px solid #ddd' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#555' }}>Search Ticker:</label>
+                <input 
+                  type="text" 
+                  value={tablePositionFilter} 
+                  onChange={(e) => setTablePositionFilter(e.target.value)} 
+                  placeholder="e.g. AAPL" 
+                  style={{ padding: '6px', borderRadius: '4px', border: '1px solid #ccc', fontSize: '13px', outline: 'none', width: '120px' }} 
+                />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#555' }}>Status:</label>
+                <select 
+                  value={tableStatusFilter} 
+                  onChange={(e) => setTableStatusFilter(e.target.value)} 
+                  style={{ padding: '6px', borderRadius: '4px', border: '1px solid #ccc', fontSize: '13px', outline: 'none' }}
+                >
+                  <option value="All">All Positions</option>
+                  <option value="OPEN">Open Only</option>
+                  <option value="CLOSED">Closed Only</option>
+                </select>
+              </div>
+            </div>
+            {/* ------------------------- */}
+
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px', minWidth: '950px' }}>
               <thead>
                 <tr style={{ backgroundColor: '#f8f9fa', borderBottom: '2px solid #ddd', borderTop: '1px solid #ddd' }}>
@@ -1432,8 +1464,23 @@ export default function App() {
               </thead>
               <tbody>
                 {Object.values(tickerStats)
-                  .filter(stat => showClosedPositions || stat.qty > 0)
-                  .filter(stat => portfolioFilter === 'All' || stat.ticker === portfolioFilter)
+                  .filter(stat => {
+                    // Respect the global top right dropdown Portfolio filter
+                    if (portfolioFilter !== 'All' && stat.ticker !== portfolioFilter) return false;
+                    
+                    const isClosed = stat.qty === 0;
+
+                    // Table Status Dropdown logic
+                    if (tableStatusFilter === 'OPEN' && isClosed) return false;
+                    if (tableStatusFilter === 'CLOSED' && !isClosed) return false;
+                    // If table dropdown is "All", respect the sidebar "Show Closed" checkbox
+                    if (tableStatusFilter === 'All' && !showClosedPositions && isClosed) return false;
+
+                    // Table Ticker Search logic
+                    if (tablePositionFilter && !stat.ticker.toLowerCase().includes(tablePositionFilter.toLowerCase())) return false;
+
+                    return true;
+                  })
                   .sort((a, b) => a.ticker.localeCompare(b.ticker) || a.positionNum - b.positionNum)
                   .map((stat, index) => {
                     const totalTickerPositions = Object.values(tickerStats).filter(s => s.ticker === stat.ticker).length;

@@ -111,10 +111,19 @@ export default function App() {
   const [isEntryMethodModalOpen, setIsEntryMethodModalOpen] = useState(false);
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
   const [isPortfolioModalOpen, setIsPortfolioModalOpen] = useState(false);
+  const [isManualEntryModalOpen, setIsManualEntryModalOpen] = useState(false);
   
   const [newEntryMethod, setNewEntryMethod] = useState('');
   const [newFeedback, setNewFeedback] = useState('');
   const [newPortfolio, setNewPortfolio] = useState('');
+
+  // --- Manual Trade Entry State ---
+  const [manualTradeDate, setManualTradeDate] = useState(new Date().toISOString().split('T')[0]);
+  const [manualTradeTicker, setManualTradeTicker] = useState('');
+  const [manualTradeAction, setManualTradeAction] = useState('buy');
+  const [manualTradePrice, setManualTradePrice] = useState('');
+  const [manualTradeQty, setManualTradeQty] = useState('');
+  const [manualTradePortfolio, setManualTradePortfolio] = useState('');
 
   // --- Calculator State ---
   const [calcMode, setCalcMode] = useState('position');
@@ -333,6 +342,47 @@ export default function App() {
     const updated = feedbacks.filter(f => f !== feedbackToRemove);
     setFeedbacks(updated);
     updateSettingInDB('feedbacks', updated);
+  };
+
+  // --- MANUAL ENTRY HANDLER ---
+  const handleManualTradeSubmit = async (e) => {
+    e.preventDefault();
+    if (!manualTradeDate || !manualTradeTicker || !manualTradePrice || !manualTradeQty) {
+      alert("Please fill in all fields to record the trade.");
+      return;
+    }
+
+    const targetPortfolio = manualTradePortfolio || selectedPortfolio;
+    const newTrade = {
+      portfolio: targetPortfolio,
+      trade_date: manualTradeDate,
+      ticker: manualTradeTicker.toUpperCase().trim(),
+      action: manualTradeAction,
+      price: parseFloat(manualTradePrice),
+      quantity: Math.abs(parseInt(manualTradeQty, 10))
+    };
+
+    try {
+      const { error } = await supabase.from('trades').insert([newTrade]);
+      if (error) throw error;
+      
+      setIsManualEntryModalOpen(false);
+      setManualTradeTicker('');
+      setManualTradePrice('');
+      setManualTradeQty('');
+      setManualTradeDate(new Date().toISOString().split('T')[0]); // reset to today
+      setManualTradeAction('buy');
+      
+      // If the trade was added to the currently viewed portfolio, refresh the list
+      if (targetPortfolio === selectedPortfolio) {
+        fetchTradesFromDB();
+      } else {
+        alert(`Trade successfully added to ${targetPortfolio}.`);
+      }
+    } catch (error) { 
+      console.error("Error adding trade:", error.message); 
+      alert("Failed to add trade. Please try again."); 
+    }
   };
 
   // --- UPLOAD HANDLER ---
@@ -786,6 +836,11 @@ export default function App() {
             Export Journal
           </button>
 
+          <button onClick={() => { setManualTradePortfolio(selectedPortfolio); setIsManualEntryModalOpen(true); }} style={{ padding: '8px 12px', backgroundColor: '#43a047', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            Manual Entry
+          </button>
+
           <button onClick={() => setIsUploadModalOpen(true)} style={{ padding: '8px 12px', backgroundColor: '#5c6bc0', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
             Upload Transaction
@@ -968,6 +1023,62 @@ export default function App() {
               <label style={{ display: 'block', fontSize: '13px', fontWeight: 'bold', color: '#555', marginBottom: '8px' }}>Choose CSV File:</label>
               <input type="file" accept=".csv" onChange={handleFileUpload} style={{ width: '100%', padding: '10px', border: '1px dashed #ccc', borderRadius: '4px', cursor: 'pointer' }} />
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MANUAL ENTRY MODAL */}
+      {isManualEntryModalOpen && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ backgroundColor: '#fff', padding: '25px', borderRadius: '8px', width: '420px', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '2px solid #eee', paddingBottom: '10px' }}>
+              <h3 style={{ margin: 0, color: '#333' }}>Manually Record Trade</h3>
+              <button onClick={() => setIsManualEntryModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#888' }}>&times;</button>
+            </div>
+            
+            <form onSubmit={handleManualTradeSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#555' }}>Target Portfolio:</label>
+                <select 
+                  value={manualTradePortfolio} 
+                  onChange={(e) => setManualTradePortfolio(e.target.value)}
+                  style={{ padding: '8px', borderRadius: '4px', border: '1px solid #ccc', width: '180px', outline: 'none' }}>
+                  {portfolios.map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#555' }}>Date:</label>
+                <input type="date" value={manualTradeDate} onChange={(e) => setManualTradeDate(e.target.value)} required style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', width: '180px', outline: 'none', boxSizing: 'border-box' }} />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#555' }}>Ticker:</label>
+                <input type="text" value={manualTradeTicker} onChange={(e) => setManualTradeTicker(e.target.value.toUpperCase())} required placeholder="e.g. AAPL" style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', width: '180px', outline: 'none', boxSizing: 'border-box', textTransform: 'uppercase' }} />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#555' }}>Action:</label>
+                <select value={manualTradeAction} onChange={(e) => setManualTradeAction(e.target.value)} style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', width: '180px', outline: 'none', boxSizing: 'border-box' }}>
+                  <option value="buy">BUY</option>
+                  <option value="sell">SELL</option>
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#555' }}>Execution Price ($):</label>
+                <input type="number" step="0.0001" value={manualTradePrice} onChange={(e) => setManualTradePrice(e.target.value)} required placeholder="0.00" style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', width: '180px', outline: 'none', boxSizing: 'border-box' }} />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#555' }}>Quantity:</label>
+                <input type="number" min="1" step="1" value={manualTradeQty} onChange={(e) => setManualTradeQty(e.target.value)} required placeholder="0" style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', width: '180px', outline: 'none', boxSizing: 'border-box' }} />
+              </div>
+
+              <button type="submit" style={{ marginTop: '10px', padding: '10px', backgroundColor: '#43a047', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>
+                Save Trade to Database
+              </button>
+            </form>
           </div>
         </div>
       )}
@@ -1192,8 +1303,8 @@ export default function App() {
           {trades.length === 0 ? <p style={{ color: '#888' }}>No trades found for this period.</p> : null}
           <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
             {analyzedTrades
-              .slice() // Create a copy of the array
-              .reverse() // Sort in descending order (newest trades first)
+              .slice() 
+              .reverse() 
               .filter(trade => {
                 if (historyFilter === 'All') return true;
                 if (historyFilter.includes('-')) {

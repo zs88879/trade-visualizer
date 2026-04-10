@@ -1169,10 +1169,24 @@ export default function App() {
               .map((trade, index) => {
                 const isSelected = selectedTicker === trade.ticker;
                 const colorIdx = (trade.positionNum - 1) % CYCLE_COLORS.length;
-                const bgColor = isSelected ? CYCLE_COLORS[colorIdx].bg : '#fff';
-                const borderColor = isSelected ? CYCLE_COLORS[colorIdx].border : '#e0e0e0';
+                
+                // Fix: Persistent cycle colors, highlight via drop shadow when selected
+                const bgColor = CYCLE_COLORS[colorIdx].bg;
+                const borderColor = CYCLE_COLORS[colorIdx].border;
+                
                 return (
-                  <li key={index} onClick={() => { setSelectedTicker(trade.ticker); setActiveTab('chart'); setPortfolioFilter(trade.ticker); setHistoryFilter(trade.ticker); }} style={{ padding: '12px', marginBottom: '8px', cursor: 'pointer', borderRadius: '6px', transition: 'background-color 0.2s', backgroundColor: bgColor, border: `1px solid ${borderColor}` }}>
+                  <li key={index} 
+                      onClick={() => { setSelectedTicker(trade.ticker); setActiveTab('chart'); setPortfolioFilter(trade.ticker); setHistoryFilter(trade.ticker); }} 
+                      style={{ 
+                        padding: '12px', 
+                        marginBottom: '8px', 
+                        cursor: 'pointer', 
+                        borderRadius: '6px', 
+                        transition: 'all 0.2s', 
+                        backgroundColor: bgColor, 
+                        border: `1px solid ${borderColor}`,
+                        boxShadow: isSelected ? `0 2px 8px rgba(0,0,0,0.15), inset 4px 0 0 ${borderColor}` : 'none'
+                      }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
                       <span>{trade.ticker} <span style={{fontSize: '11px', color: '#888', fontWeight: 'normal'}}>#{trade.positionNum}</span></span>
                       <span style={{ color: trade['buy/sell'] === 'buy' ? '#26a69a' : '#ef5350' }}>{trade['buy/sell'].toUpperCase()}</span>

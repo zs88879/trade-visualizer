@@ -1052,6 +1052,22 @@ export default function App() {
             <div style={{ marginBottom: '25px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #ddd', paddingBottom: '8px', marginBottom: '10px' }}>
                 <h3 style={{ margin: 0 }}>Portfolio Summary</h3>
+                
+                {/* --- RESTORED FILTER --- */}
+                {uniqueTickers.length > 0 && (
+                  <select 
+                    value={portfolioFilter} 
+                    onChange={(e) => { 
+                      setPortfolioFilter(e.target.value); 
+                      setHistoryFilter(e.target.value); 
+                      if(e.target.value === 'All') setSelectedTicker(null);
+                    }} 
+                    style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #ccc', fontSize: '13px', outline: 'none', maxWidth: '120px' }}>
+                    <option value="All">All Tickers</option>
+                    {uniqueTickers.map(ticker => (<option key={ticker} value={ticker}>{ticker}</option>))}
+                  </select>
+                )}
+
               </div>
               <div style={{ display: 'flex', alignItems: 'center', marginBottom: '15px' }}>
                 <input type="checkbox" id="showClosed" checked={showClosedPositions} onChange={(e) => setShowClosedPositions(e.target.checked)} style={{ cursor: 'pointer' }} />
@@ -1062,9 +1078,8 @@ export default function App() {
                 .filter(stat => showClosedPositions || stat.qty > 0)
                 .filter(stat => {
                    // Keep the sidebar synced with the general historyFilter if a specific ticker is chosen
-                   if (historyFilter === 'All') return true;
-                   const targetTicker = historyFilter.includes('-') ? historyFilter.split('-')[0] : historyFilter;
-                   return stat.ticker === targetTicker;
+                   if (portfolioFilter === 'All') return true;
+                   return stat.ticker === portfolioFilter;
                 })
                 .sort((a, b) => a.ticker.localeCompare(b.ticker) || a.positionNum - b.positionNum)
                 .map(stat => {

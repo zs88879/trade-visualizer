@@ -1052,12 +1052,6 @@ export default function App() {
             <div style={{ marginBottom: '25px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #ddd', paddingBottom: '8px', marginBottom: '10px' }}>
                 <h3 style={{ margin: 0 }}>Portfolio Summary</h3>
-                {uniqueTickers.length > 0 && (
-                  <select value={portfolioFilter} onChange={(e) => { setPortfolioFilter(e.target.value); setHistoryFilter(e.target.value); }} style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #ccc', fontSize: '13px', outline: 'none' }}>
-                    <option value="All">All Tickers</option>
-                    {uniqueTickers.map(ticker => (<option key={ticker} value={ticker}>{ticker}</option>))}
-                  </select>
-                )}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', marginBottom: '15px' }}>
                 <input type="checkbox" id="showClosed" checked={showClosedPositions} onChange={(e) => setShowClosedPositions(e.target.checked)} style={{ cursor: 'pointer' }} />
@@ -1066,7 +1060,12 @@ export default function App() {
 
               {Object.values(tickerStats)
                 .filter(stat => showClosedPositions || stat.qty > 0)
-                .filter(stat => portfolioFilter === 'All' || stat.ticker === portfolioFilter)
+                .filter(stat => {
+                   // Keep the sidebar synced with the general historyFilter if a specific ticker is chosen
+                   if (historyFilter === 'All') return true;
+                   const targetTicker = historyFilter.includes('-') ? historyFilter.split('-')[0] : historyFilter;
+                   return stat.ticker === targetTicker;
+                })
                 .sort((a, b) => a.ticker.localeCompare(b.ticker) || a.positionNum - b.positionNum)
                 .map(stat => {
                 const totalTickerPositions = Object.values(tickerStats).filter(s => s.ticker === stat.ticker).length;
@@ -1091,7 +1090,7 @@ export default function App() {
                 const openHeat = !isNaN(stopPrice) && stat.currentPrice > 0 ? (stat.currentPrice - stopPrice) * stat.qty : null;
 
                 return (
-                  <div key={stat.id} onClick={() => { setSelectedTicker(stat.ticker); setActiveTab('chart'); setPortfolioFilter(stat.ticker); setHistoryFilter(stat.ticker); }} style={{ padding: '12px', backgroundColor: '#fff', border: '1px solid #e0e0e0', borderRadius: '6px', marginBottom: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', cursor: 'pointer' }}>
+                  <div key={stat.id} onClick={() => { setSelectedTicker(stat.ticker); setActiveTab('chart'); setPortfolioFilter(stat.ticker); setHistoryFilter(stat.id); }} style={{ padding: '12px', backgroundColor: '#fff', border: '1px solid #e0e0e0', borderRadius: '6px', marginBottom: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', cursor: 'pointer' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '16px', marginBottom: '8px' }}>
                       <span>{displayName} <span style={{fontSize: '13px', color: '#666', fontWeight: 'normal'}}>(Qty: {stat.qty})</span></span>
                       <span>${stat.currentPrice && stat.qty > 0 ? stat.currentPrice.toFixed(2) : '--'}</span>
@@ -1155,9 +1154,22 @@ export default function App() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', borderBottom: '2px solid #ddd', paddingBottom: '8px' }}>
             <h3 style={{ margin: '0' }}>Trade History</h3>
             {uniqueTickers.length > 0 && (
-              <select value={historyFilter} onChange={(e) => { setHistoryFilter(e.target.value); setPortfolioFilter(e.target.value); }} style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #ccc', fontSize: '13px', outline: 'none' }}>
+              <select value={historyFilter} onChange={(e) => { const val = e.target.value; setHistoryFilter(val); setPortfolioFilter(val.includes('-') ? val.split('-')[0] : val); }} style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #ccc', fontSize: '13px', outline: 'none', maxWidth: '140px' }}>
                 <option value="All">All Tickers</option>
-                {uniqueTickers.map(ticker => (<option key={ticker} value={ticker}>{ticker}</option>))}
+                {uniqueTickers.map(ticker => {
+                  const cycles = Object.values(tickerStats).filter(s => s.ticker === ticker);
+                  if (cycles.length <= 1) {
+                    return <option key={ticker} value={ticker}>{ticker}</option>;
+                  }
+                  return (
+                    <optgroup key={ticker} label={ticker}>
+                      <option value={ticker}>All {ticker}</option>
+                      {cycles.map(c => (
+                        <option key={c.id} value={c.id}>{c.ticker} #{c.positionNum} ({c.qty > 0 ? 'OPEN' : 'CLOSED'})</option>
+                      ))}
+                    </optgroup>
+                  );
+                })}
               </select>
             )}
           </div>
@@ -1165,18 +1177,25 @@ export default function App() {
           {trades.length === 0 ? <p style={{ color: '#888' }}>No trades found for this period.</p> : null}
           <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
             {analyzedTrades
-              .filter(trade => historyFilter === 'All' || trade.ticker === historyFilter)
+              .slice() // Create a copy of the array
+              .reverse() // Sort in descending order (newest trades first)
+              .filter(trade => {
+                if (historyFilter === 'All') return true;
+                if (historyFilter.includes('-')) {
+                  return `${trade.ticker}-${trade.positionNum}` === historyFilter;
+                }
+                return trade.ticker === historyFilter;
+              })
               .map((trade, index) => {
                 const isSelected = selectedTicker === trade.ticker;
                 const colorIdx = (trade.positionNum - 1) % CYCLE_COLORS.length;
                 
-                // Fix: Persistent cycle colors, highlight via drop shadow when selected
                 const bgColor = CYCLE_COLORS[colorIdx].bg;
                 const borderColor = CYCLE_COLORS[colorIdx].border;
                 
                 return (
                   <li key={index} 
-                      onClick={() => { setSelectedTicker(trade.ticker); setActiveTab('chart'); setPortfolioFilter(trade.ticker); setHistoryFilter(trade.ticker); }} 
+                      onClick={() => { setSelectedTicker(trade.ticker); setActiveTab('chart'); setPortfolioFilter(trade.ticker); setHistoryFilter(`${trade.ticker}-${trade.positionNum}`); }} 
                       style={{ 
                         padding: '12px', 
                         marginBottom: '8px', 
@@ -1499,7 +1518,7 @@ export default function App() {
                     const currentR = (!isClosed && stat.avgCost > 0 && stat.currentPrice > 0) ? ((stat.currentPrice / stat.avgCost - 1) / 0.02) : null;
 
                     return (
-                      <tr key={stat.id} style={{ borderBottom: '1px solid #eee', backgroundColor: index % 2 === 0 ? '#fff' : '#fafafa', transition: 'background-color 0.2s', cursor: 'pointer' }} onClick={() => { setSelectedTicker(stat.ticker); setActiveTab('chart'); setPortfolioFilter(stat.ticker); setHistoryFilter(stat.ticker); }} onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f1f8ff'} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = index % 2 === 0 ? '#fff' : '#fafafa'}>
+                      <tr key={stat.id} style={{ borderBottom: '1px solid #eee', backgroundColor: index % 2 === 0 ? '#fff' : '#fafafa', transition: 'background-color 0.2s', cursor: 'pointer' }} onClick={() => { setSelectedTicker(stat.ticker); setActiveTab('chart'); setPortfolioFilter(stat.ticker); setHistoryFilter(stat.id); }} onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f1f8ff'} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = index % 2 === 0 ? '#fff' : '#fafafa'}>
                         <td style={{ padding: '12px 10px', fontWeight: 'bold' }}>{displayName}</td>
                         <td style={{ padding: '12px 10px', textAlign: 'center' }}><span style={{ padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 'bold', backgroundColor: isClosed ? '#e0e0e0' : '#bbdefb', color: isClosed ? '#666' : '#1565c0' }}>{isClosed ? 'CLOSED' : 'OPEN'}</span></td>
                         <td style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 'bold' }}>{stat.qty}</td>

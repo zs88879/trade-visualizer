@@ -1085,6 +1085,10 @@ export default function App() {
                 const breakEvenPct = breakEvenPrice !== null && stat.currentPrice > 0 ? ((breakEvenPrice / stat.currentPrice) - 1) * 100 : null;
                 const breakEvenPctStr = breakEvenPct !== null ? ` (${breakEvenPct > 0 ? '+' : ''}${breakEvenPct.toFixed(2)}%)` : '';
                 const currentR = (stat.qty > 0 && stat.avgCost > 0 && stat.currentPrice > 0) ? ((stat.currentPrice / stat.avgCost - 1) / 0.02).toFixed(2) : null;
+                
+                // Sidebar additions for Open Positions
+                const indPosSizePct = parsedEquity > 0 ? (((stat.qty * stat.avgCost) / parsedEquity) * 100).toFixed(2) + '%' : '--';
+                const openHeat = !isNaN(stopPrice) && stat.currentPrice > 0 ? (stat.currentPrice - stopPrice) * stat.qty : null;
 
                 return (
                   <div key={stat.id} onClick={() => { setSelectedTicker(stat.ticker); setActiveTab('chart'); setPortfolioFilter(stat.ticker); setHistoryFilter(stat.ticker); }} style={{ padding: '12px', backgroundColor: '#fff', border: '1px solid #e0e0e0', borderRadius: '6px', marginBottom: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', cursor: 'pointer' }}>
@@ -1105,6 +1109,10 @@ export default function App() {
                     {stat.qty > 0 && (
                       <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed #eee' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '4px' }}>
+                          <span style={{ color: '#555' }}>Pos Size:</span>
+                          <span style={{ color: '#333', fontWeight: 'bold' }}>{indPosSizePct}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '4px' }}>
                           <span style={{ color: '#555' }}>Break-Even Price:</span>
                           <span style={{ color: '#1565c0', fontWeight: 'bold' }}>${breakEvenPrice.toFixed(2)}{breakEvenPctStr}</span>
                         </div>
@@ -1123,6 +1131,12 @@ export default function App() {
                           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginTop: '4px' }}>
                             <span style={{ color: '#555' }}>Risk:</span>
                             <span style={{ color: openRisk > 0 ? '#d32f2f' : '#2e7d32', fontWeight: 'bold' }}>${openRisk.toFixed(2)} ({riskPct}%)</span>
+                          </div>
+                        )}
+                        {openHeat !== null && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginTop: '4px' }}>
+                            <span style={{ color: '#555' }}>Open Heat:</span>
+                            <span style={{ color: '#333', fontWeight: 'bold' }}>${openHeat.toFixed(2)}</span>
                           </div>
                         )}
                       </div>
@@ -1275,52 +1289,12 @@ export default function App() {
               .map((stat) => {
                 const totalTickerPositions = Object.values(tickerStats).filter(s => s.ticker === stat.ticker).length;
                 const displayName = totalTickerPositions > 1 ? `${stat.ticker} (Active Trade #${stat.positionNum})` : stat.ticker;
-                const today = new Date(); let totalOpenDays = 0;
-                stat.openLots.forEach(lot => { const days = (today - lot.date) / (1000 * 60 * 60 * 24); totalOpenDays += Math.max(0, days) * lot.qty; });
-                const stopPrice = parseFloat(riskPrices[stat.id]);
-                const openRisk = !isNaN(stopPrice) ? (stat.avgCost - stopPrice) * stat.qty : null;
-                const riskPct = !isNaN(stopPrice) && stat.avgCost > 0 ? (((stat.avgCost - stopPrice) / stat.avgCost) * 100).toFixed(2) : null;
-                const openHeat = !isNaN(stopPrice) && stat.currentPrice > 0 ? (stat.currentPrice - stopPrice) * stat.qty : null;
-                
-                const breakEvenPrice = stat.qty > 0 ? stat.avgCost - (stat.realizedPL / stat.qty) : null;
-                const breakEvenPct = breakEvenPrice !== null && stat.currentPrice > 0 ? ((breakEvenPrice / stat.currentPrice) - 1) * 100 : null;
-                const breakEvenPctStr = breakEvenPct !== null ? ` (${breakEvenPct > 0 ? '+' : ''}${breakEvenPct.toFixed(2)}%)` : '';
-                
-                const indPosSizePct = parsedEquity > 0 ? (((stat.qty * stat.avgCost) / parsedEquity) * 100).toFixed(2) + '%' : '--';
-                const currentR = (stat.avgCost > 0 && stat.currentPrice > 0) ? ((stat.currentPrice / stat.avgCost - 1) / 0.02).toFixed(2) : null;
-
                 const currentNoteObj = tradeNotes[stat.id] || { note: '', entryMethod: '', feedback: '' };
 
                 return (
                   <div key={stat.id} style={{ marginTop: '20px', padding: '12px', backgroundColor: '#e3f2fd', borderRadius: '8px', border: '1px solid #90caf9' }}>
-                    <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: '#1565c0' }}>{displayName} Live Position Analytics</h4>
-                    <div style={{ display: 'flex', gap: '15px', flexWrap: 'wrap' }}>
-                      <div style={{ flex: 1, minWidth: '120px', padding: '8px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #bbdefb' }}>
-                        <div style={{ fontSize: '10px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Open P/L</div>
-                        <div style={{ fontSize: '16px', fontWeight: 'bold', color: stat.openPL >= 0 ? '#2e7d32' : '#d32f2f' }}>{stat.openPL >= 0 ? '+' : '-'}${Math.abs(stat.openPL).toFixed(2)}</div>
-                      </div>
-                      <div style={{ flex: 1, minWidth: '120px', padding: '8px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #bbdefb' }}>
-                        <div style={{ fontSize: '10px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Pos Sizing (%)</div>
-                        <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#333' }}>{indPosSizePct}</div>
-                      </div>
-                      <div style={{ flex: 1, minWidth: '120px', padding: '8px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #bbdefb' }}>
-                        <div style={{ fontSize: '10px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Break-Even</div>
-                        <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#333' }}>{breakEvenPrice !== null ? `$${breakEvenPrice.toFixed(2)}${breakEvenPctStr}` : '--'}</div>
-                      </div>
-                      <div style={{ flex: 1, minWidth: '120px', padding: '8px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #bbdefb' }}>
-                        <div style={{ fontSize: '10px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Current R</div>
-                        <div style={{ fontSize: '16px', fontWeight: 'bold', color: currentR !== null ? (currentR > 0 ? '#2e7d32' : '#d32f2f') : '#888' }}>{currentR !== null ? `${currentR}R` : '--'}</div>
-                      </div>
-                      <div style={{ flex: 1, minWidth: '120px', padding: '8px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #bbdefb' }}>
-                        <div style={{ fontSize: '10px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Open Risk</div>
-                        <div style={{ fontSize: '16px', fontWeight: 'bold', color: openRisk === null ? '#888' : (openRisk > 0 ? '#d32f2f' : '#2e7d32') }}>{openRisk !== null ? `$${openRisk.toFixed(2)} (${riskPct}%)` : 'Set Stop'}</div>
-                      </div>
-                      <div style={{ flex: 1, minWidth: '120px', padding: '8px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #bbdefb' }}>
-                        <div style={{ fontSize: '10px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Open Heat</div>
-                        <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#333' }}>{openHeat !== null ? `$${openHeat.toFixed(2)}` : 'Set Stop'}</div>
-                      </div>
-                    </div>
-                    <div style={{ marginTop: '12px' }}>
+                    <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: '#1565c0' }}>{displayName} Trade Notes</h4>
+                    <div>
                       <div style={{ display: 'flex', gap: '10px', marginBottom: '8px' }}>
                         <select 
                           value={currentNoteObj.entryMethod || ''} 

@@ -1121,7 +1121,7 @@ export default function App() {
                         </div>
                         {openRisk !== null && (
                           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginTop: '4px' }}>
-                            <span style={{ color: '#555' }}>Risk (Locked Profit):</span>
+                            <span style={{ color: '#555' }}>Risk:</span>
                             <span style={{ color: openRisk > 0 ? '#d32f2f' : '#2e7d32', fontWeight: 'bold' }}>${openRisk.toFixed(2)} ({riskPct}%)</span>
                           </div>
                         )}

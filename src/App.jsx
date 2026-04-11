@@ -466,9 +466,13 @@ export default function App() {
         const stopData = stopPrices[stat.id] || {};
         const initialStop = parseFloat(stopData.initial);
 
-        const currentR = (!isClosed && stat.avgCost > 0 && stat.currentPrice > 0 && !isNaN(initialStop) && stat.avgCost > initialStop) 
-          ? ((stat.currentPrice - stat.avgCost) / (stat.avgCost - initialStop)) 
-          : null;
+        let currentR = null;
+        let baseRiskPctStr = '';
+        if (!isClosed && stat.avgCost > 0 && stat.currentPrice > 0 && !isNaN(initialStop) && stat.avgCost > initialStop) {
+            currentR = ((stat.currentPrice - stat.avgCost) / (stat.avgCost - initialStop)).toFixed(2);
+            const baseRiskPct = ((stat.avgCost - initialStop) / stat.avgCost) * 100;
+            baseRiskPctStr = `<${baseRiskPct.toFixed(2)}%>`;
+        }
 
         return {
           "Portfolio": selectedPortfolio,
@@ -476,7 +480,7 @@ export default function App() {
           "Avg Entry Price": stat.avgCost.toFixed(2), "Net Realized P/L ($)": stat.realizedPL.toFixed(2), "Open P/L ($)": stat.qty > 0 ? stat.openPL.toFixed(2) : "0.00",
           "Break-Even Price": breakEvenPrice !== null ? breakEvenPrice.toFixed(2) : "N/A",
           "Break-Even %": breakEvenPct !== null ? breakEvenPct.toFixed(2) + '%' : "N/A",
-          "Current R": currentR !== null ? currentR.toFixed(2) : "N/A",
+          "Current R": currentR !== null ? `${baseRiskPctStr} ${currentR}R` : "N/A",
           "Gross Profit ($)": stat.grossProfit.toFixed(2), "Gross Loss ($)": stat.grossLoss.toFixed(2), 
           "Win % (>0.5%)": stat.tradesClosed > 0 ? ((stat.winningTrades / stat.tradesClosed) * 100).toFixed(0) + '%' : "N/A",
           "Loss % (<-0.5%)": stat.tradesClosed > 0 ? ((stat.losingTrades / stat.tradesClosed) * 100).toFixed(0) + '%' : "N/A",
@@ -1237,8 +1241,11 @@ export default function App() {
                 const breakEvenPctStr = breakEvenPct !== null ? ` (${breakEvenPct > 0 ? '+' : ''}${breakEvenPct.toFixed(2)}%)` : '';
                 
                 let currentR = null;
+                let baseRiskPctStr = '';
                 if (stat.qty > 0 && stat.avgCost > 0 && stat.currentPrice > 0 && !isNaN(initialStop) && stat.avgCost > initialStop) {
                     currentR = ((stat.currentPrice - stat.avgCost) / (stat.avgCost - initialStop)).toFixed(2);
+                    const baseRiskPct = ((stat.avgCost - initialStop) / stat.avgCost) * 100;
+                    baseRiskPctStr = `<${baseRiskPct.toFixed(2)}%>`;
                 }
                 
                 const indPosSizePct = parsedEquity > 0 ? (((stat.qty * stat.avgCost) / parsedEquity) * 100).toFixed(2) + '%' : '--';
@@ -1271,7 +1278,7 @@ export default function App() {
                           <span style={{ color: '#1565c0', fontWeight: 'bold' }}>${breakEvenPrice.toFixed(2)}{breakEvenPctStr}</span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '4px' }}>
-                          <span style={{ color: '#555' }}>Current R:</span>
+                          <span style={{ color: '#555' }}>Current R {baseRiskPctStr}:</span>
                           <span style={{ color: currentR > 0 ? '#2e7d32' : (currentR < 0 ? '#d32f2f' : '#333'), fontWeight: 'bold' }}>{currentR !== null ? `${currentR}R` : '--'}</span>
                         </div>
                         
@@ -1685,8 +1692,11 @@ export default function App() {
                     const breakEvenPctStr = breakEvenPct !== null ? ` (${breakEvenPct > 0 ? '+' : ''}${breakEvenPct.toFixed(2)}%)` : '';
 
                     let currentR = null;
+                    let baseRiskPctStr = '';
                     if (!isClosed && stat.avgCost > 0 && stat.currentPrice > 0 && !isNaN(initialStop) && stat.avgCost > initialStop) {
-                        currentR = ((stat.currentPrice - stat.avgCost) / (stat.avgCost - initialStop));
+                        currentR = ((stat.currentPrice - stat.avgCost) / (stat.avgCost - initialStop)).toFixed(2);
+                        const baseRiskPct = ((stat.avgCost - initialStop) / stat.avgCost) * 100;
+                        baseRiskPctStr = `<${baseRiskPct.toFixed(2)}%>`;
                     }
 
                     return (
@@ -1698,7 +1708,7 @@ export default function App() {
                         <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{stat.realizedPL >= 0 ? '+' : ''}{stat.realizedPL === 0 ? '--' : '$' + stat.realizedPL.toFixed(2)}</td>
                         <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.openPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{isClosed ? '--' : (stat.openPL >= 0 ? '+' : '') + '$' + stat.openPL.toFixed(2)}</td>
                         <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333', fontWeight: 'bold' }}>{isClosed ? '--' : '$' + breakEvenPrice.toFixed(2) + breakEvenPctStr}</td>
-                        <td style={{ padding: '12px 10px', textAlign: 'right', color: currentR > 0 ? '#2e7d32' : (currentR < 0 ? '#d32f2f' : '#333'), fontWeight: 'bold' }}>{isClosed ? '--' : (currentR !== null ? currentR.toFixed(2) + 'R' : '--')}</td>
+                        <td style={{ padding: '12px 10px', textAlign: 'right', color: currentR > 0 ? '#2e7d32' : (currentR < 0 ? '#d32f2f' : '#333'), fontWeight: 'bold' }}>{isClosed ? '--' : (currentR !== null ? `${baseRiskPctStr} ${currentR}R` : '--')}</td>
                         <td style={{ padding: '12px 10px', textAlign: 'center', color: '#555' }}>{posWinRate}/{posLossRate} / {posPF}</td>
                         <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333' }}>{displayDaysHeld}</td>
                         

@@ -83,11 +83,10 @@ export default function App() {
   const [historyFilter, setHistoryFilter] = useState('All');
   const [portfolioFilter, setPortfolioFilter] = useState('All');
   
-  // --- New Table Specific Filters ---
   const [tablePositionFilter, setTablePositionFilter] = useState('');
   const [tableStatusFilter, setTableStatusFilter] = useState('All');
 
-  const [riskPrices, setRiskPrices] = useState({});
+  const [stopPrices, setStopPrices] = useState({});
   const [tradeNotes, setTradeNotes] = useState({});
   const [accountEquity, setAccountEquity] = useState('');
 
@@ -194,8 +193,10 @@ export default function App() {
       if (error) throw error;
       if (data) {
         const stopsObj = {};
-        data.forEach(row => { stopsObj[row.position_id] = row.stop_price; });
-        setRiskPrices(stopsObj);
+        data.forEach(row => { 
+          stopsObj[row.position_id] = { current: row.stop_price, initial: row.initial_stop }; 
+        });
+        setStopPrices(stopsObj);
       }
     } catch (error) { console.error("Error fetching stops from DB:", error.message); }
   };
@@ -241,10 +242,9 @@ export default function App() {
   // Fetch data when portfolio or date range changes
   useEffect(() => { 
     if (isAuthenticated) { 
-      // Fully reset state for new portfolio fetch
       setTrades([]); 
       setTickerStats({}); 
-      setRiskPrices({}); 
+      setStopPrices({}); 
       setTradeNotes({}); 
       setSelectedTicker(null);
       setPortfolioFilter('All');
@@ -258,12 +258,32 @@ export default function App() {
   }, [startDate, endDate, isAuthenticated, selectedPortfolio]);
 
   // --- SYNC FUNCTIONS ---
-  const syncStopPrice = async (posId, price) => {
-    const val = parseFloat(price);
+  const handleStopChange = (posId, field, value) => {
+    setStopPrices(prev => ({
+      ...prev,
+      [posId]: { ...(prev[posId] || {}), [field]: value }
+    }));
+  };
+
+  const syncStopData = async (posId) => {
+    const data = stopPrices[posId] || {};
+    const currentVal = parseFloat(data.current);
+    const initialVal = parseFloat(data.initial);
+    
+    const isEmpty = isNaN(currentVal) && isNaN(initialVal);
+    
     try {
-      if (!isNaN(val)) await supabase.from('active_stops').upsert({ portfolio: selectedPortfolio, position_id: posId, stop_price: val });
-      else await supabase.from('active_stops').delete().match({ portfolio: selectedPortfolio, position_id: posId });
-    } catch (error) { console.error("Network or code error:", error.message); }
+      if (isEmpty) {
+        await supabase.from('active_stops').delete().match({ portfolio: selectedPortfolio, position_id: posId });
+      } else {
+        await supabase.from('active_stops').upsert({ 
+          portfolio: selectedPortfolio, 
+          position_id: posId, 
+          stop_price: isNaN(currentVal) ? null : currentVal,
+          initial_stop: isNaN(initialVal) ? null : initialVal
+        });
+      }
+    } catch (error) { console.error("Network or code error syncing stops:", error.message); }
   };
 
   const handleNoteDataChange = (posId, field, value) => {
@@ -370,10 +390,9 @@ export default function App() {
       setManualTradeTicker('');
       setManualTradePrice('');
       setManualTradeQty('');
-      setManualTradeDate(new Date().toISOString().split('T')[0]); // reset to today
+      setManualTradeDate(new Date().toISOString().split('T')[0]); 
       setManualTradeAction('buy');
       
-      // If the trade was added to the currently viewed portfolio, refresh the list
       if (targetPortfolio === selectedPortfolio) {
         fetchTradesFromDB();
       } else {
@@ -443,8 +462,13 @@ export default function App() {
         const isClosed = stat.qty === 0;
         const breakEvenPrice = !isClosed ? (stat.avgCost - (stat.realizedPL / stat.qty)) : null;
         const breakEvenPct = !isClosed && stat.currentPrice > 0 ? ((breakEvenPrice / stat.currentPrice) - 1) * 100 : null;
-        const currentR = (!isClosed && stat.avgCost > 0 && stat.currentPrice > 0) ? ((stat.currentPrice / stat.avgCost - 1) / 0.02) : null;
         const notesObj = tradeNotes[stat.id] || {};
+        const stopData = stopPrices[stat.id] || {};
+        const initialStop = parseFloat(stopData.initial);
+
+        const currentR = (!isClosed && stat.avgCost > 0 && stat.currentPrice > 0 && !isNaN(initialStop) && stat.avgCost > initialStop) 
+          ? ((stat.currentPrice - stat.avgCost) / (stat.avgCost - initialStop)) 
+          : null;
 
         return {
           "Portfolio": selectedPortfolio,
@@ -456,7 +480,9 @@ export default function App() {
           "Gross Profit ($)": stat.grossProfit.toFixed(2), "Gross Loss ($)": stat.grossLoss.toFixed(2), 
           "Win % (>0.5%)": stat.tradesClosed > 0 ? ((stat.winningTrades / stat.tradesClosed) * 100).toFixed(0) + '%' : "N/A",
           "Loss % (<-0.5%)": stat.tradesClosed > 0 ? ((stat.losingTrades / stat.tradesClosed) * 100).toFixed(0) + '%' : "N/A",
-          "Total Trades in Cycle": stat.tradesClosed, "Stop Price": riskPrices[stat.id] || "None", 
+          "Total Trades in Cycle": stat.tradesClosed, 
+          "Initial Stop": stopData.initial || "None",
+          "Stop Price": stopData.current || "None", 
           "Entry Method": notesObj.entryMethod || "",
           "Feedback": notesObj.feedback || "",
           "Trade Journal Notes": notesObj.note || ""
@@ -590,14 +616,13 @@ export default function App() {
     const avgWinDays = totalWinShares > 0 ? (totalWinDays / totalWinShares).toFixed(1) : 0;
     const avgLossDays = totalLossShares > 0 ? (totalLossDays / totalLossShares).toFixed(1) : 0;
     
-    // Save preliminary UI state *before* live price fetch to avoid blank screens
     setAdvancedStats({ maxDD, maxWinStreak, maxLossStreak, avgWinDays, avgLossDays });
     setTickerStats({ ...stats }); 
 
     const fetchCurrentPrices = async () => {
       try {
         const openPositions = Object.values(stats).filter(stat => stat.qty > 0);
-        if (openPositions.length === 0) return; // Exit early if no open positions
+        if (openPositions.length === 0) return;
 
         const uniqueOpenTickers = [...new Set(openPositions.map(s => s.ticker))];
         for (let i = 0; i < uniqueOpenTickers.length; i++) {
@@ -724,7 +749,7 @@ export default function App() {
 
   const totalOpenHeat = statsArray.reduce((sum, stat) => {
     if (stat.qty > 0) {
-      const stopPrice = parseFloat(riskPrices[stat.id]);
+      const stopPrice = parseFloat(stopPrices[stat.id]?.current);
       if (!isNaN(stopPrice) && stat.currentPrice > 0) return sum + ((stat.currentPrice - stopPrice) * stat.qty);
     }
     return sum;
@@ -732,7 +757,7 @@ export default function App() {
 
   const totalOpenRisk = statsArray.reduce((sum, stat) => {
     if (stat.qty > 0) {
-      const stopPrice = parseFloat(riskPrices[stat.id]);
+      const stopPrice = parseFloat(stopPrices[stat.id]?.current);
       if (!isNaN(stopPrice) && stat.avgCost > 0) return sum + ((stat.avgCost - stopPrice) * stat.qty);
     }
     return sum;
@@ -1164,7 +1189,6 @@ export default function App() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #ddd', paddingBottom: '8px', marginBottom: '10px' }}>
                 <h3 style={{ margin: 0 }}>Portfolio Summary</h3>
                 
-                {/* --- RESTORED FILTER --- */}
                 {uniqueTickers.length > 0 && (
                   <select 
                     value={portfolioFilter} 
@@ -1188,7 +1212,6 @@ export default function App() {
               {Object.values(tickerStats)
                 .filter(stat => showClosedPositions || stat.qty > 0)
                 .filter(stat => {
-                   // Keep the sidebar synced with the general historyFilter if a specific ticker is chosen
                    if (portfolioFilter === 'All') return true;
                    return stat.ticker === portfolioFilter;
                 })
@@ -1202,16 +1225,22 @@ export default function App() {
                 const posPF = stat.grossLoss === 0 ? (stat.grossProfit > 0 ? 'MAX' : '0.0') : (stat.grossProfit / stat.grossLoss).toFixed(1);
                 const posAvgDays = stat.sharesClosed > 0 ? (stat.totalDaysHeld / stat.sharesClosed).toFixed(1) : 0;
                 
-                const stopPrice = parseFloat(riskPrices[stat.id]);
+                const stopData = stopPrices[stat.id] || {};
+                const stopPrice = parseFloat(stopData.current);
+                const initialStop = parseFloat(stopData.initial);
+
                 const openRisk = !isNaN(stopPrice) ? (stat.avgCost - stopPrice) * stat.qty : null;
                 const riskPct = !isNaN(stopPrice) && stat.avgCost > 0 ? (((stat.avgCost - stopPrice) / stat.avgCost) * 100).toFixed(2) : null;
 
                 const breakEvenPrice = stat.qty > 0 ? stat.avgCost - (stat.realizedPL / stat.qty) : null;
                 const breakEvenPct = breakEvenPrice !== null && stat.currentPrice > 0 ? ((breakEvenPrice / stat.currentPrice) - 1) * 100 : null;
                 const breakEvenPctStr = breakEvenPct !== null ? ` (${breakEvenPct > 0 ? '+' : ''}${breakEvenPct.toFixed(2)}%)` : '';
-                const currentR = (stat.qty > 0 && stat.avgCost > 0 && stat.currentPrice > 0) ? ((stat.currentPrice / stat.avgCost - 1) / 0.02).toFixed(2) : null;
                 
-                // Sidebar additions for Open Positions
+                let currentR = null;
+                if (stat.qty > 0 && stat.avgCost > 0 && stat.currentPrice > 0 && !isNaN(initialStop) && stat.avgCost > initialStop) {
+                    currentR = ((stat.currentPrice - stat.avgCost) / (stat.avgCost - initialStop)).toFixed(2);
+                }
+                
                 const indPosSizePct = parsedEquity > 0 ? (((stat.qty * stat.avgCost) / parsedEquity) * 100).toFixed(2) + '%' : '--';
                 const openHeat = !isNaN(stopPrice) && stat.currentPrice > 0 ? (stat.currentPrice - stopPrice) * stat.qty : null;
 
@@ -1245,13 +1274,23 @@ export default function App() {
                           <span style={{ color: '#555' }}>Current R:</span>
                           <span style={{ color: currentR > 0 ? '#2e7d32' : (currentR < 0 ? '#d32f2f' : '#333'), fontWeight: 'bold' }}>{currentR !== null ? `${currentR}R` : '--'}</span>
                         </div>
+                        
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px', marginBottom: '4px' }}>
+                          <span style={{ color: '#555' }}>Initial Stop:</span>
+                          <div style={{ position: 'relative' }}>
+                            <span style={{ position: 'absolute', left: '6px', top: '50%', transform: 'translateY(-50%)', color: '#888', fontSize: '12px' }}>$</span>
+                            <input type="number" step="0.01" value={stopData.initial || ''} onChange={(e) => handleStopChange(stat.id, 'initial', e.target.value)} onBlur={() => syncStopData(stat.id)} onKeyDown={(e) => { if (e.key === 'Enter') { syncStopData(stat.id); e.target.blur(); } }} onClick={(e) => e.stopPropagation()} style={{ width: '80px', padding: '2px 4px 2px 16px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '13px', outline: 'none' }} placeholder="0.00" />
+                          </div>
+                        </div>
+
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px', marginBottom: '4px' }}>
                           <span style={{ color: '#555' }}>Stop Price:</span>
                           <div style={{ position: 'relative' }}>
                             <span style={{ position: 'absolute', left: '6px', top: '50%', transform: 'translateY(-50%)', color: '#888', fontSize: '12px' }}>$</span>
-                            <input type="number" step="0.01" value={riskPrices[stat.id] || ''} onChange={(e) => setRiskPrices({...riskPrices, [stat.id]: e.target.value})} onBlur={(e) => syncStopPrice(stat.id, e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { syncStopPrice(stat.id, e.target.value); e.target.blur(); } }} onClick={(e) => e.stopPropagation()} style={{ width: '80px', padding: '2px 4px 2px 16px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '13px', outline: 'none' }} placeholder="0.00" />
+                            <input type="number" step="0.01" value={stopData.current || ''} onChange={(e) => handleStopChange(stat.id, 'current', e.target.value)} onBlur={() => syncStopData(stat.id)} onKeyDown={(e) => { if (e.key === 'Enter') { syncStopData(stat.id); e.target.blur(); } }} onClick={(e) => e.stopPropagation()} style={{ width: '80px', padding: '2px 4px 2px 16px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '13px', outline: 'none' }} placeholder="0.00" />
                           </div>
                         </div>
+
                         {openRisk !== null && (
                           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginTop: '4px' }}>
                             <span style={{ color: '#555' }}>Risk:</span>
@@ -1590,6 +1629,7 @@ export default function App() {
                   <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Current R</th>
                   <th style={{ padding: '12px 10px', textAlign: 'center', color: '#555' }}>W/L % / PF</th>
                   <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Days Held</th>
+                  <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Initial Stop</th>
                   <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Stop Price</th>
                   <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Open Risk</th>
                   <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Open Heat</th>
@@ -1632,7 +1672,10 @@ export default function App() {
                       displayDaysHeld = (totalOpenDays / stat.qty).toFixed(1);
                     }
 
-                    const stopPrice = parseFloat(riskPrices[stat.id]);
+                    const stopData = stopPrices[stat.id] || {};
+                    const stopPrice = parseFloat(stopData.current);
+                    const initialStop = parseFloat(stopData.initial);
+
                     const openRisk = !isClosed && !isNaN(stopPrice) ? (stat.avgCost - stopPrice) * stat.qty : null;
                     const openHeat = !isClosed && !isNaN(stopPrice) && stat.currentPrice > 0 ? (stat.currentPrice - stopPrice) * stat.qty : null;
                     const tablePosSizePct = !isClosed && parsedEquity > 0 ? (((stat.qty * stat.avgCost) / parsedEquity) * 100).toFixed(2) + '%' : '--';
@@ -1641,7 +1684,10 @@ export default function App() {
                     const breakEvenPct = !isClosed && stat.currentPrice > 0 ? ((breakEvenPrice / stat.currentPrice) - 1) * 100 : null;
                     const breakEvenPctStr = breakEvenPct !== null ? ` (${breakEvenPct > 0 ? '+' : ''}${breakEvenPct.toFixed(2)}%)` : '';
 
-                    const currentR = (!isClosed && stat.avgCost > 0 && stat.currentPrice > 0) ? ((stat.currentPrice / stat.avgCost - 1) / 0.02) : null;
+                    let currentR = null;
+                    if (!isClosed && stat.avgCost > 0 && stat.currentPrice > 0 && !isNaN(initialStop) && stat.avgCost > initialStop) {
+                        currentR = ((stat.currentPrice - stat.avgCost) / (stat.avgCost - initialStop));
+                    }
 
                     return (
                       <tr key={stat.id} style={{ borderBottom: '1px solid #eee', backgroundColor: index % 2 === 0 ? '#fff' : '#fafafa', transition: 'background-color 0.2s', cursor: 'pointer' }} onClick={() => { setSelectedTicker(stat.ticker); setActiveTab('chart'); setPortfolioFilter(stat.ticker); setHistoryFilter(stat.id); }} onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f1f8ff'} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = index % 2 === 0 ? '#fff' : '#fafafa'}>
@@ -1655,11 +1701,18 @@ export default function App() {
                         <td style={{ padding: '12px 10px', textAlign: 'right', color: currentR > 0 ? '#2e7d32' : (currentR < 0 ? '#d32f2f' : '#333'), fontWeight: 'bold' }}>{isClosed ? '--' : (currentR !== null ? currentR.toFixed(2) + 'R' : '--')}</td>
                         <td style={{ padding: '12px 10px', textAlign: 'center', color: '#555' }}>{posWinRate}/{posLossRate} / {posPF}</td>
                         <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333' }}>{displayDaysHeld}</td>
+                        
                         <td style={{ padding: '8px 10px', textAlign: 'right' }}>
                           {isClosed ? '--' : (
-                            <input type="number" step="0.01" value={riskPrices[stat.id] || ''} onChange={(e) => setRiskPrices({...riskPrices, [stat.id]: e.target.value})} onBlur={(e) => syncStopPrice(stat.id, e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { syncStopPrice(stat.id, e.target.value); e.target.blur(); } }} onClick={(e) => e.stopPropagation()} style={{ width: '70px', padding: '4px 6px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '13px', outline: 'none', textAlign: 'right' }} placeholder="0.00" />
+                            <input type="number" step="0.01" value={stopData.initial || ''} onChange={(e) => handleStopChange(stat.id, 'initial', e.target.value)} onBlur={() => syncStopData(stat.id)} onKeyDown={(e) => { if (e.key === 'Enter') { syncStopData(stat.id); e.target.blur(); } }} onClick={(e) => e.stopPropagation()} style={{ width: '70px', padding: '4px 6px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '13px', outline: 'none', textAlign: 'right' }} placeholder="0.00" />
                           )}
                         </td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                          {isClosed ? '--' : (
+                            <input type="number" step="0.01" value={stopData.current || ''} onChange={(e) => handleStopChange(stat.id, 'current', e.target.value)} onBlur={() => syncStopData(stat.id)} onKeyDown={(e) => { if (e.key === 'Enter') { syncStopData(stat.id); e.target.blur(); } }} onClick={(e) => e.stopPropagation()} style={{ width: '70px', padding: '4px 6px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '13px', outline: 'none', textAlign: 'right' }} placeholder="0.00" />
+                          )}
+                        </td>
+
                         <td style={{ padding: '12px 10px', textAlign: 'right', color: openRisk === null ? '#aaa' : (openRisk > 0 ? '#d32f2f' : '#2e7d32'), fontWeight: 'bold' }}>{isClosed ? '--' : (openRisk !== null ? `$${openRisk.toFixed(2)}` : 'Set Stop')}</td>
                         <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333', fontWeight: 'bold' }}>{isClosed ? '--' : (openHeat !== null ? `$${openHeat.toFixed(2)}` : 'Set Stop')}</td>
                       </tr>

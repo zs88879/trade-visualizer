@@ -89,6 +89,7 @@ export default function App() {
   const [stopPrices, setStopPrices] = useState({});
   const [tradeNotes, setTradeNotes] = useState({});
   const [accountEquity, setAccountEquity] = useState('');
+  const [equityDate, setEquityDate] = useState('');
 
   const [advancedStats, setAdvancedStats] = useState({ maxDD: 0, maxWinStreak: 0, maxLossStreak: 0, avgWinDays: 0, avgLossDays: 0 });
   const [activeTab, setActiveTab] = useState('chart');
@@ -140,7 +141,9 @@ export default function App() {
   useEffect(() => {
     if (selectedPortfolio) {
       const savedEquity = localStorage.getItem(`trade_journal_equity_${selectedPortfolio}`);
+      const savedDate = localStorage.getItem(`trade_journal_equity_date_${selectedPortfolio}`);
       setAccountEquity(savedEquity || '');
+      setEquityDate(savedDate || '');
     }
   }, [selectedPortfolio]);
 
@@ -148,7 +151,10 @@ export default function App() {
     if (selectedPortfolio && accountEquity !== undefined) {
       localStorage.setItem(`trade_journal_equity_${selectedPortfolio}`, accountEquity);
     }
-  }, [accountEquity, selectedPortfolio]);
+    if (selectedPortfolio && equityDate !== undefined) {
+      localStorage.setItem(`trade_journal_equity_date_${selectedPortfolio}`, equityDate);
+    }
+  }, [accountEquity, equityDate, selectedPortfolio]);
 
   const handleLogin = (e) => {
     e.preventDefault();
@@ -580,7 +586,7 @@ export default function App() {
         realizedEvents.push({ date: tradeDate, pl: pl, plPct: plPct }); 
 
         const yyyy = tradeDate.getFullYear(); const mm = String(tradeDate.getMonth() + 1).padStart(2, '0'); const monthKey = `${yyyy}-${mm}`; 
-        if (!mStats[monthKey]) mStats[monthKey] = { monthKey, realizedPL: 0, grossProfit: 0, grossLoss: 0, tradesClosed: 0, winningTrades: 0, losingTrades: 0 };
+        if (!mStats[monthKey]) mStats[monthKey] = { monthKey, realizedPL: 0, grossProfit: 0, grossLoss: 0, tradesClosed: 0, winningTrades: 0, losingTrades: 0, eomEquity: 0 };
         mStats[monthKey].realizedPL += pl; mStats[monthKey].tradesClosed++;
         
         if (pl > 0) mStats[monthKey].grossProfit += pl; 
@@ -601,6 +607,13 @@ export default function App() {
         }
         if (s.qty === 0) positionCounters[trade.ticker]++;
       }
+    });
+
+    const parsedBaseEquity = parseFloat(accountEquity) || 0;
+    let runningPL = 0;
+    Object.keys(mStats).sort().forEach(key => {
+        runningPL += mStats[key].realizedPL;
+        mStats[key].eomEquity = parsedBaseEquity > 0 ? parsedBaseEquity + runningPL : 0;
     });
 
     setMonthlyStats(mStats); setAnalyzedTrades(enrichedTradesList);
@@ -647,7 +660,7 @@ export default function App() {
       } catch (error) {}
     };
     fetchCurrentPrices();
-  }, [trades]);
+  }, [trades, accountEquity]);
 
   // Handle Chart Initialization & Resize Logic
   useEffect(() => {
@@ -781,6 +794,9 @@ export default function App() {
     return sum;
   }, 0);
 
+  const totalOpenPL = statsArray.reduce((sum, stat) => sum + (stat.qty > 0 && stat.openPL ? stat.openPL : 0), 0);
+  const currentPortfolioValue = parsedEquity > 0 ? (parsedEquity + totalRealizedPL + totalOpenPL) : 0;
+
   const globalRiskPct = parsedEquity > 0 && totalOpenRisk > 0 ? ((totalOpenRisk / parsedEquity) * 100).toFixed(2) : '--';
 
   const uniqueTickers = [...new Set(trades.map(t => t.ticker))].sort();
@@ -855,46 +871,37 @@ export default function App() {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap' }}>
-          
           <button onClick={() => setIsCalcModalOpen(true)} style={{ padding: '8px 12px', backgroundColor: '#2e7d32', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect><rect x="9" y="9" width="6" height="6"></rect><line x1="9" y1="1" x2="9" y2="4"></line><line x1="15" y1="1" x2="15" y2="4"></line><line x1="9" y1="20" x2="9" y2="20"></line><line x1="15" y1="20" x2="15" y2="23"></line><line x1="20" y1="9" x2="23" y2="9"></line><line x1="20" y1="14" x2="23" y2="14"></line><line x1="1" y1="9" x2="4" y2="9"></line><line x1="1" y1="14" x2="4" y2="14"></line></svg>
             Calculator
           </button>
-
           <button onClick={() => setIsOutlookModalOpen(true)} style={{ padding: '8px 12px', backgroundColor: '#f57c00', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
             Company Outlook
           </button>
-
           <button onClick={() => setIsEntryMethodModalOpen(true)} style={{ padding: '8px 12px', backgroundColor: '#8e24aa', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
             Entry Methods
           </button>
-          
           <button onClick={() => setIsFeedbackModalOpen(true)} style={{ padding: '8px 12px', backgroundColor: '#00897b', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
             Feedback Tags
           </button>
-
           <button onClick={handleExportCSV} style={{ padding: '8px 12px', backgroundColor: '#1565c0', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
             Export Journal
           </button>
-
           <button onClick={() => { setManualTradePortfolio(selectedPortfolio); setIsManualEntryModalOpen(true); }} style={{ padding: '8px 12px', backgroundColor: '#43a047', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
             Manual Entry
           </button>
-
           <button onClick={() => setIsUploadModalOpen(true)} style={{ padding: '8px 12px', backgroundColor: '#5c6bc0', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
             Upload Transaction
           </button>
           
           <div style={{ borderLeft: '2px solid #ddd', height: '24px' }}></div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div title={`Total Value for ${selectedPortfolio}. Auto-saves locally.`} style={{ display: 'flex', alignItems: 'center', backgroundColor: '#e3f2fd', padding: '4px 8px', borderRadius: '4px', border: '1px solid #90caf9' }}>
-              <label style={{ fontSize: '12px', fontWeight: 'bold', color: '#1565c0', marginRight: '6px', textTransform: 'uppercase' }}>Equity $:</label>
-              <input type="number" value={accountEquity} onChange={(e) => setAccountEquity(e.target.value)} style={{ padding: '4px', borderRadius: '4px', border: '1px solid #ccc', width: '100px', outline: 'none' }} placeholder="100000" />
+            {/* NEW: As of Date included alongside Start Equity */}
+            <div title={`Starting Equity for ${selectedPortfolio}.`} style={{ display: 'flex', alignItems: 'center', backgroundColor: '#e3f2fd', padding: '4px 8px', borderRadius: '4px', border: '1px solid #90caf9' }}>
+              <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#1565c0', marginRight: '6px', textTransform: 'uppercase' }}>Start Equity:</label>
+              <span style={{color: '#1565c0', fontSize:'12px', fontWeight:'bold', marginRight:'2px'}}>$</span>
+              <input type="number" value={accountEquity} onChange={(e) => setAccountEquity(e.target.value)} style={{ padding: '4px', borderRadius: '4px', border: '1px solid #ccc', width: '80px', outline: 'none', fontSize: '12px' }} placeholder="100000" />
+              <input type="date" title="As of Date" value={equityDate} onChange={(e) => setEquityDate(e.target.value)} style={{ marginLeft: '6px', padding: '3px', borderRadius: '4px', border: '1px solid #ccc', outline: 'none', fontSize: '11px', color: '#333' }} />
             </div>
 
             <div style={{ borderLeft: '2px solid #ddd', height: '24px', margin: '0 5px' }}></div>
@@ -913,9 +920,6 @@ export default function App() {
           <button onClick={() => setIsAuthenticated(false)} style={{ padding: '6px 12px', backgroundColor: '#f44336', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>Lock</button>
         </div>
       </div>
-
-      {/* MODALS OMITTED FOR BREVITY, NO CHANGES REQUIRED IN PORTFOLIO/ENTRY/FEEDBACK/OUTLOOK MODALS */}
-      {/* ... keeping the same logic for all modals ... */}
 
       {/* PORTFOLIO MANAGER MODAL */}
       {isPortfolioModalOpen && (
@@ -1397,6 +1401,12 @@ export default function App() {
             {statsArray.length > 0 && (
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 
+                {/* NEW CURRENT PORTFOLIO VALUE CARD */}
+                <div title="Starting Cash + Net Realized P/L + Total Open P/L" style={{ flex: 1, minWidth: '130px', padding: '8px', backgroundColor: '#eceff1', borderRadius: '6px', border: '1px solid #cfd8dc', cursor: 'help' }}>
+                  <div style={{ fontSize: '10px', color: '#37474f', textTransform: 'uppercase', fontWeight: 'bold' }}>Current Portfolio</div>
+                  <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#263238' }}>{currentPortfolioValue > 0 ? `$${currentPortfolioValue.toFixed(2)}` : '--'}</div>
+                </div>
+
                 <div title="Gross Profit divided by Gross Loss across all closed trades." style={{ flex: 1, minWidth: '100px', padding: '8px', backgroundColor: '#f8f9fa', borderRadius: '6px', border: '1px solid #e0e0e0', cursor: 'help' }}>
                   <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Profit Factor</div>
                   <div style={{ fontSize: '14px', fontWeight: 'bold', color: profitFactor > 1 || profitFactor === 'MAX' ? '#2e7d32' : '#d32f2f' }}>{profitFactor}</div>
@@ -1622,6 +1632,8 @@ export default function App() {
                       <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Gross Profit</th>
                       <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Gross Loss</th>
                       <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Net Realized P/L</th>
+                      {/* NEW EOM COLUMN */}
+                      <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>End of Month Equity</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1642,6 +1654,7 @@ export default function App() {
                             <td style={{ padding: '12px 10px', textAlign: 'right', color: '#2e7d32' }}>+${stat.grossProfit.toFixed(2)}</td>
                             <td style={{ padding: '12px 10px', textAlign: 'right', color: '#d32f2f' }}>-${stat.grossLoss.toFixed(2)}</td>
                             <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold', fontSize: '15px' }}>{stat.realizedPL >= 0 ? '+' : '-'}${Math.abs(stat.realizedPL).toFixed(2)}</td>
+                            <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333', fontWeight: 'bold', fontSize: '15px' }}>{stat.eomEquity > 0 ? `$${stat.eomEquity.toFixed(2)}` : '--'}</td>
                           </tr>
                         );
                     })}

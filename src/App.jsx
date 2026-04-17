@@ -775,8 +775,13 @@ export default function App() {
   const globalSharesClosed = statsArray.reduce((sum, stat) => sum + stat.sharesClosed, 0);
   const globalAvgDaysHeld = globalSharesClosed > 0 ? (globalTotalDaysHeld / globalSharesClosed).toFixed(1) : 0;
 
-  const totalInvested = statsArray.reduce((sum, stat) => sum + (stat.qty * stat.avgCost), 0);
-  const totalPosPct = parsedEquity > 0 ? ((totalInvested / parsedEquity) * 100).toFixed(2) : '--';
+  // NEW DYNAMIC CURRENT PORTFOLIO VALUE MATH
+  const totalOpenPL = statsArray.reduce((sum, stat) => sum + (stat.qty > 0 && stat.openPL ? stat.openPL : 0), 0);
+  const currentPortfolioValue = parsedEquity > 0 ? (parsedEquity + totalRealizedPL + totalOpenPL) : 0;
+
+  // TOTAL INVESTED % (NOW BASED ON REAL-TIME EQUITY & REAL-TIME POSITION VALUE)
+  const totalInvested = statsArray.reduce((sum, stat) => sum + (stat.qty * (stat.currentPrice || stat.avgCost)), 0);
+  const totalPosPct = currentPortfolioValue > 0 ? ((totalInvested / currentPortfolioValue) * 100).toFixed(2) : '--';
 
   const totalOpenHeat = statsArray.reduce((sum, stat) => {
     if (stat.qty > 0) {
@@ -794,10 +799,8 @@ export default function App() {
     return sum;
   }, 0);
 
-  const totalOpenPL = statsArray.reduce((sum, stat) => sum + (stat.qty > 0 && stat.openPL ? stat.openPL : 0), 0);
-  const currentPortfolioValue = parsedEquity > 0 ? (parsedEquity + totalRealizedPL + totalOpenPL) : 0;
-
-  const globalRiskPct = parsedEquity > 0 && totalOpenRisk > 0 ? ((totalOpenRisk / parsedEquity) * 100).toFixed(2) : '--';
+  // GLOBAL OPEN RISK % (NOW BASED ON REAL-TIME EQUITY)
+  const globalRiskPct = currentPortfolioValue > 0 && totalOpenRisk > 0 ? ((totalOpenRisk / currentPortfolioValue) * 100).toFixed(2) : '--';
 
   const uniqueTickers = [...new Set(trades.map(t => t.ticker))].sort();
 
@@ -896,7 +899,6 @@ export default function App() {
           <div style={{ borderLeft: '2px solid #ddd', height: '24px' }}></div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            {/* NEW: As of Date included alongside Start Equity */}
             <div title={`Starting Equity for ${selectedPortfolio}.`} style={{ display: 'flex', alignItems: 'center', backgroundColor: '#e3f2fd', padding: '4px 8px', borderRadius: '4px', border: '1px solid #90caf9' }}>
               <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#1565c0', marginRight: '6px', textTransform: 'uppercase' }}>Start Equity:</label>
               <span style={{color: '#1565c0', fontSize:'12px', fontWeight:'bold', marginRight:'2px'}}>$</span>
@@ -1246,7 +1248,10 @@ export default function App() {
                     baseRiskPctStr = `<${baseRiskPct.toFixed(2)}%>`;
                 }
                 
-                const indPosSizePct = parsedEquity > 0 ? (((stat.qty * stat.avgCost) / parsedEquity) * 100).toFixed(2) + '%' : '--';
+                // NEW SIDEBAR POSITION SIZE % LOGIC
+                const currentPosValue = stat.qty * (stat.currentPrice || stat.avgCost);
+                const indPosSizePct = currentPortfolioValue > 0 ? ((currentPosValue / currentPortfolioValue) * 100).toFixed(2) + '%' : '--';
+
                 const openHeat = !isNaN(stopPrice) && stat.currentPrice > 0 ? (stat.currentPrice - stopPrice) * stat.qty : null;
 
                 return (
@@ -1571,7 +1576,10 @@ export default function App() {
 
                       const openRisk = !isClosed && !isNaN(stopPrice) ? (stat.avgCost - stopPrice) * stat.qty : null;
                       const openHeat = !isClosed && !isNaN(stopPrice) && stat.currentPrice > 0 ? (stat.currentPrice - stopPrice) * stat.qty : null;
-                      const tablePosSizePct = !isClosed && parsedEquity > 0 ? (((stat.qty * stat.avgCost) / parsedEquity) * 100).toFixed(2) + '%' : '--';
+                      
+                      // NEW TABLE POSITION SIZE % LOGIC
+                      const currentPosValue = stat.qty * (stat.currentPrice || stat.avgCost);
+                      const tablePosSizePct = !isClosed && currentPortfolioValue > 0 ? ((currentPosValue / currentPortfolioValue) * 100).toFixed(2) + '%' : '--';
                       
                       const breakEvenPrice = !isClosed ? (stat.avgCost - (stat.realizedPL / stat.qty)) : null;
                       const breakEvenPct = !isClosed && stat.currentPrice > 0 ? ((breakEvenPrice / stat.currentPrice) - 1) * 100 : null;
@@ -1632,7 +1640,6 @@ export default function App() {
                       <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Gross Profit</th>
                       <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Gross Loss</th>
                       <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Net Realized P/L</th>
-                      {/* NEW EOM COLUMN */}
                       <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>End of Month Equity</th>
                     </tr>
                   </thead>

@@ -566,7 +566,10 @@ export default function App() {
       const s = stats[posId]; const tradeDate = new Date(trade.formattedDate);
       
       if (trade['buy/sell'] === 'buy') {
-        s.qty += trade.quantity; s.totalCost += (trade.price * trade.quantity); s.avgCost = s.qty > 0 ? s.totalCost / s.qty : 0;
+        // Weighted Average Cost Logic: already correct here!
+        s.qty += trade.quantity; 
+        s.totalCost += (trade.price * trade.quantity); 
+        s.avgCost = s.qty > 0 ? s.totalCost / s.qty : 0;
         s.openLots.push({ date: tradeDate, qty: trade.quantity });
       } else if (trade['buy/sell'] === 'sell') {
         const closedCost = s.avgCost * trade.quantity; 
@@ -720,7 +723,6 @@ export default function App() {
         
         const markers = tickerTrades.map((trade) => {
           const colorIdx = (trade.positionNum - 1) % CYCLE_COLORS.length; const markerColor = CYCLE_COLORS[colorIdx].border;
-          // MODIFIED: Added @ $trade.price.toFixed(2) to the marker text
           return { time: trade.formattedDate, position: trade['buy/sell'] === 'buy' ? 'belowBar' : 'aboveBar', color: markerColor, shape: trade['buy/sell'] === 'buy' ? 'arrowUp' : 'arrowDown', text: `${trade['buy/sell'] === 'buy' ? 'B' : 'S'} #${trade.positionNum}: ${trade.quantity} @ $${trade.price.toFixed(2)}` };
         });
         markers.sort((a, b) => new Date(a.time) - new Date(b.time));
@@ -1274,6 +1276,10 @@ export default function App() {
                     {stat.qty > 0 && (
                       <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed #eee' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '4px' }}>
+                          <span style={{ color: '#555' }}>Avg Entry Price:</span>
+                          <span style={{ color: '#1565c0', fontWeight: 'bold' }}>${stat.avgCost.toFixed(2)}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '4px' }}>
                           <span style={{ color: '#555' }}>Pos Size:</span>
                           <span style={{ color: '#333', fontWeight: 'bold' }}>{indPosSizePct}</span>
                         </div>
@@ -1529,6 +1535,7 @@ export default function App() {
                     <th style={{ padding: '12px 10px', textAlign: 'left', color: '#555' }}>Position</th>
                     <th style={{ padding: '12px 10px', textAlign: 'center', color: '#555' }}>Status</th>
                     <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Qty</th>
+                    <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Avg Entry</th>
                     <th title="Percentage of Account Equity allocated to this position." style={{ padding: '12px 10px', textAlign: 'right', color: '#555', cursor: 'help' }}>Pos %</th>
                     <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Realized P/L</th>
                     <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Open P/L</th>
@@ -1599,6 +1606,7 @@ export default function App() {
                           <td style={{ padding: '12px 10px', fontWeight: 'bold' }}>{displayName}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'center' }}><span style={{ padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 'bold', backgroundColor: isClosed ? '#e0e0e0' : '#bbdefb', color: isClosed ? '#666' : '#1565c0' }}>{isClosed ? 'CLOSED' : 'OPEN'}</span></td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 'bold' }}>{stat.qty}</td>
+                          <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333', fontWeight: 'bold' }}>{isClosed ? '--' : '$' + stat.avgCost.toFixed(2)}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333' }}>{tablePosSizePct}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{stat.realizedPL >= 0 ? '+' : ''}{stat.realizedPL === 0 ? '--' : '$' + stat.realizedPL.toFixed(2)}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.openPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{isClosed ? '--' : (stat.openPL >= 0 ? '+' : '') + '$' + stat.openPL.toFixed(2)}</td>

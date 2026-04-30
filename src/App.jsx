@@ -546,7 +546,42 @@ export default function App() {
       return;
     }
 
-    const stats = {}; const mStats = {}; const positionCounters = {}; const enrichedTradesList = []; let realizedEvents = []; 
+    // --- PASS 1: Calculate Fixed Global Average Cost per Cycle ---
+    const cycleData = {};
+    const tempCounters = {};
+
+    trades.forEach(trade => {
+      if (tempCounters[trade.ticker] === undefined) tempCounters[trade.ticker] = 1;
+      const posNum = tempCounters[trade.ticker];
+      const posId = `${trade.ticker}-${posNum}`;
+
+      if (!cycleData[posId]) {
+        cycleData[posId] = { totalBuyQty: 0, totalBuyCost: 0, globalAvgCost: 0, qtyTracker: 0 };
+      }
+
+      if (trade['buy/sell'] === 'buy') {
+        cycleData[posId].qtyTracker += trade.quantity;
+        cycleData[posId].totalBuyQty += trade.quantity;
+        cycleData[posId].totalBuyCost += (trade.price * trade.quantity);
+      } else if (trade['buy/sell'] === 'sell') {
+        cycleData[posId].qtyTracker -= trade.quantity;
+        if (cycleData[posId].qtyTracker <= 0.0001) { // Close cycle cleanly
+          cycleData[posId].qtyTracker = 0;
+          tempCounters[trade.ticker]++;
+        }
+      }
+    });
+
+    Object.values(cycleData).forEach(cd => {
+      cd.globalAvgCost = cd.totalBuyQty > 0 ? cd.totalBuyCost / cd.totalBuyQty : 0;
+    });
+
+    // --- PASS 2: Main Processing Pipeline using Global Avg ---
+    const stats = {}; 
+    const mStats = {}; 
+    const positionCounters = {}; 
+    const enrichedTradesList = []; 
+    let realizedEvents = []; 
     
     trades.forEach(trade => {
       if (positionCounters[trade.ticker] === undefined) positionCounters[trade.ticker] = 1;
@@ -557,27 +592,30 @@ export default function App() {
 
       if (!stats[posId]) {
         stats[posId] = { 
-          id: posId, ticker: trade.ticker, positionNum: currentPosNum, qty: 0, totalCost: 0, realizedPL: 0, avgCost: 0, currentPrice: 0, openPL: 0,
-          openLots: [], totalDaysHeld: 0, sharesClosed: 0, tradesClosed: 0, winningTrades: 0, losingTrades: 0, grossProfit: 0, grossLoss: 0, totalClosedCost: 0,
+          id: posId, ticker: trade.ticker, positionNum: currentPosNum, qty: 0, 
+          realizedPL: 0, avgCost: cycleData[posId].globalAvgCost, currentPrice: 0, openPL: 0,
+          openLots: [], totalDaysHeld: 0, sharesClosed: 0, tradesClosed: 0, 
+          winningTrades: 0, losingTrades: 0, grossProfit: 0, grossLoss: 0, totalClosedCost: 0,
           winDays: 0, winShares: 0, lossDays: 0, lossShares: 0
         };
       }
       
-      const s = stats[posId]; const tradeDate = new Date(trade.formattedDate);
+      const s = stats[posId]; 
+      const tradeDate = new Date(trade.formattedDate);
       
       if (trade['buy/sell'] === 'buy') {
-        // Weighted Average Cost Logic: already correct here!
         s.qty += trade.quantity; 
-        s.totalCost += (trade.price * trade.quantity); 
-        s.avgCost = s.qty > 0 ? s.totalCost / s.qty : 0;
         s.openLots.push({ date: tradeDate, qty: trade.quantity });
       } else if (trade['buy/sell'] === 'sell') {
-        const closedCost = s.avgCost * trade.quantity; 
-        const pl = trade.quantity * (trade.price - s.avgCost);
-        const plPct = s.avgCost > 0 ? (trade.price - s.avgCost) / s.avgCost : 0;
+        const fixedAvgCost = s.avgCost; // Inherited correctly from Pass 1
+        const closedCost = fixedAvgCost * trade.quantity; 
+        const pl = trade.quantity * (trade.price - fixedAvgCost);
+        const plPct = fixedAvgCost > 0 ? (trade.price - fixedAvgCost) / fixedAvgCost : 0;
         
-        s.realizedPL += pl; s.totalClosedCost += closedCost; s.qty -= trade.quantity; s.totalCost -= closedCost;
-        if (s.qty === 0) { s.avgCost = 0; s.totalCost = 0; }
+        s.realizedPL += pl; 
+        s.totalClosedCost += closedCost; 
+        s.qty -= trade.quantity; 
+        
         s.tradesClosed++;
         
         if (pl > 0) s.grossProfit += pl; 
@@ -608,7 +646,11 @@ export default function App() {
           
           lot.qty -= closeQty; qtyToClose -= closeQty; if (lot.qty === 0) s.openLots.shift();
         }
-        if (s.qty === 0) positionCounters[trade.ticker]++;
+        
+        if (s.qty <= 0.0001) { 
+          s.qty = 0; 
+          positionCounters[trade.ticker]++;
+        }
       }
     });
 

@@ -720,7 +720,8 @@ export default function App() {
         
         const markers = tickerTrades.map((trade) => {
           const colorIdx = (trade.positionNum - 1) % CYCLE_COLORS.length; const markerColor = CYCLE_COLORS[colorIdx].border;
-          return { time: trade.formattedDate, position: trade['buy/sell'] === 'buy' ? 'belowBar' : 'aboveBar', color: markerColor, shape: trade['buy/sell'] === 'buy' ? 'arrowUp' : 'arrowDown', text: `${trade['buy/sell'] === 'buy' ? 'B' : 'S'} #${trade.positionNum}: ${trade.quantity}` };
+          // MODIFIED: Added @ $trade.price.toFixed(2) to the marker text
+          return { time: trade.formattedDate, position: trade['buy/sell'] === 'buy' ? 'belowBar' : 'aboveBar', color: markerColor, shape: trade['buy/sell'] === 'buy' ? 'arrowUp' : 'arrowDown', text: `${trade['buy/sell'] === 'buy' ? 'B' : 'S'} #${trade.positionNum}: ${trade.quantity} @ $${trade.price.toFixed(2)}` };
         });
         markers.sort((a, b) => new Date(a.time) - new Date(b.time));
         if (!markersRef.current) markersRef.current = createSeriesMarkers(seriesRef.current, markers); else markersRef.current.setMarkers(markers);

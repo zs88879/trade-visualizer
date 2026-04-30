@@ -472,11 +472,12 @@ export default function App() {
         const stopData = stopPrices[stat.id] || {};
         const initialStop = parseFloat(stopData.initial);
 
-        let currentR = null;
+        let rMultiple = null;
         let baseRiskPctStr = '';
-        if (!isClosed && stat.avgCost > 0 && stat.currentPrice > 0 && !isNaN(initialStop) && stat.avgCost > initialStop) {
-            currentR = ((stat.currentPrice - stat.avgCost) / (stat.avgCost - initialStop)).toFixed(2);
-            const baseRiskPct = ((stat.avgCost - initialStop) / stat.avgCost) * 100;
+        if (!isClosed && stat.firstDayAvgCost > 0 && stat.currentPrice > 0 && !isNaN(initialStop) && stat.firstDayAvgCost > initialStop) {
+            const riskUnit = stat.firstDayAvgCost - initialStop;
+            rMultiple = ((stat.currentPrice - stat.avgCost) / riskUnit).toFixed(2);
+            const baseRiskPct = (riskUnit / stat.firstDayAvgCost) * 100;
             baseRiskPctStr = `<${baseRiskPct.toFixed(2)}%>`;
         }
 
@@ -486,7 +487,7 @@ export default function App() {
           "Avg Entry Price": stat.avgCost.toFixed(2), "Net Realized P/L ($)": stat.realizedPL.toFixed(2), "Open P/L ($)": stat.qty > 0 ? stat.openPL.toFixed(2) : "0.00",
           "Break-Even Price": breakEvenPrice !== null ? breakEvenPrice.toFixed(2) : "N/A",
           "Break-Even %": breakEvenPct !== null ? breakEvenPct.toFixed(2) + '%' : "N/A",
-          "Current R": currentR !== null ? `${baseRiskPctStr} ${currentR}R` : "N/A",
+          "R Multiple": rMultiple !== null ? `${baseRiskPctStr} ${rMultiple}R` : "N/A",
           "Gross Profit ($)": stat.grossProfit.toFixed(2), "Gross Loss ($)": stat.grossLoss.toFixed(2), 
           "Win % (>0.5%)": stat.tradesClosed > 0 ? ((stat.winningTrades / stat.tradesClosed) * 100).toFixed(0) + '%' : "N/A",
           "Loss % (<-0.5%)": stat.tradesClosed > 0 ? ((stat.losingTrades / stat.tradesClosed) * 100).toFixed(0) + '%' : "N/A",
@@ -546,7 +547,7 @@ export default function App() {
       return;
     }
 
-    // --- PASS 1: Calculate Fixed Global Average Cost per Cycle ---
+    // --- PASS 1: Calculate Global & First Day Average Cost per Cycle ---
     const cycleData = {};
     const tempCounters = {};
 
@@ -556,10 +557,22 @@ export default function App() {
       const posId = `${trade.ticker}-${posNum}`;
 
       if (!cycleData[posId]) {
-        cycleData[posId] = { totalBuyQty: 0, totalBuyCost: 0, globalAvgCost: 0, qtyTracker: 0 };
+        cycleData[posId] = { 
+          totalBuyQty: 0, totalBuyCost: 0, globalAvgCost: 0, qtyTracker: 0,
+          firstBuyDate: null, firstDayBuyQty: 0, firstDayBuyCost: 0, firstDayAvgCost: 0
+        };
       }
 
       if (trade['buy/sell'] === 'buy') {
+        // Track first day exclusively
+        if (!cycleData[posId].firstBuyDate) {
+          cycleData[posId].firstBuyDate = trade.formattedDate;
+        }
+        if (trade.formattedDate === cycleData[posId].firstBuyDate) {
+          cycleData[posId].firstDayBuyQty += trade.quantity;
+          cycleData[posId].firstDayBuyCost += (trade.price * trade.quantity);
+        }
+
         cycleData[posId].qtyTracker += trade.quantity;
         cycleData[posId].totalBuyQty += trade.quantity;
         cycleData[posId].totalBuyCost += (trade.price * trade.quantity);
@@ -574,9 +587,10 @@ export default function App() {
 
     Object.values(cycleData).forEach(cd => {
       cd.globalAvgCost = cd.totalBuyQty > 0 ? cd.totalBuyCost / cd.totalBuyQty : 0;
+      cd.firstDayAvgCost = cd.firstDayBuyQty > 0 ? cd.firstDayBuyCost / cd.firstDayBuyQty : 0;
     });
 
-    // --- PASS 2: Main Processing Pipeline using Global Avg ---
+    // --- PASS 2: Main Processing Pipeline using Stored Averages ---
     const stats = {}; 
     const mStats = {}; 
     const positionCounters = {}; 
@@ -593,7 +607,10 @@ export default function App() {
       if (!stats[posId]) {
         stats[posId] = { 
           id: posId, ticker: trade.ticker, positionNum: currentPosNum, qty: 0, 
-          realizedPL: 0, avgCost: cycleData[posId].globalAvgCost, currentPrice: 0, openPL: 0,
+          realizedPL: 0, 
+          avgCost: cycleData[posId].globalAvgCost, 
+          firstDayAvgCost: cycleData[posId].firstDayAvgCost,
+          currentPrice: 0, openPL: 0,
           openLots: [], totalDaysHeld: 0, sharesClosed: 0, tradesClosed: 0, 
           winningTrades: 0, losingTrades: 0, grossProfit: 0, grossLoss: 0, totalClosedCost: 0,
           winDays: 0, winShares: 0, lossDays: 0, lossShares: 0
@@ -1285,11 +1302,12 @@ export default function App() {
                 const breakEvenPct = breakEvenPrice !== null && stat.currentPrice > 0 ? ((breakEvenPrice / stat.currentPrice) - 1) * 100 : null;
                 const breakEvenPctStr = breakEvenPct !== null ? ` (${breakEvenPct > 0 ? '+' : ''}${breakEvenPct.toFixed(2)}%)` : '';
                 
-                let currentR = null;
+                let rMultiple = null;
                 let baseRiskPctStr = '';
-                if (stat.qty > 0 && stat.avgCost > 0 && stat.currentPrice > 0 && !isNaN(initialStop) && stat.avgCost > initialStop) {
-                    currentR = ((stat.currentPrice - stat.avgCost) / (stat.avgCost - initialStop)).toFixed(2);
-                    const baseRiskPct = ((stat.avgCost - initialStop) / stat.avgCost) * 100;
+                if (stat.qty > 0 && stat.firstDayAvgCost > 0 && stat.currentPrice > 0 && !isNaN(initialStop) && stat.firstDayAvgCost > initialStop) {
+                    const riskUnit = stat.firstDayAvgCost - initialStop;
+                    rMultiple = ((stat.currentPrice - stat.avgCost) / riskUnit).toFixed(2);
+                    const baseRiskPct = (riskUnit / stat.firstDayAvgCost) * 100;
                     baseRiskPctStr = `<${baseRiskPct.toFixed(2)}%>`;
                 }
                 
@@ -1330,8 +1348,8 @@ export default function App() {
                           <span style={{ color: '#1565c0', fontWeight: 'bold' }}>${breakEvenPrice.toFixed(2)}{breakEvenPctStr}</span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '4px' }}>
-                          <span style={{ color: '#555' }}>Current R {baseRiskPctStr}:</span>
-                          <span style={{ color: currentR > 0 ? '#2e7d32' : (currentR < 0 ? '#d32f2f' : '#333'), fontWeight: 'bold' }}>{currentR !== null ? `${currentR}R` : '--'}</span>
+                          <span style={{ color: '#555' }}>R Multiple {baseRiskPctStr}:</span>
+                          <span style={{ color: rMultiple > 0 ? '#2e7d32' : (rMultiple < 0 ? '#d32f2f' : '#333'), fontWeight: 'bold' }}>{rMultiple !== null ? `${rMultiple}R` : '--'}</span>
                         </div>
                         
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px', marginBottom: '4px' }}>
@@ -1582,7 +1600,7 @@ export default function App() {
                     <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Realized P/L</th>
                     <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Open P/L</th>
                     <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Break-Even</th>
-                    <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Current R</th>
+                    <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>R Multiple</th>
                     <th style={{ padding: '12px 10px', textAlign: 'center', color: '#555' }}>W/L % / PF</th>
                     <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Days Held</th>
                     <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Initial Stop</th>
@@ -1635,11 +1653,12 @@ export default function App() {
                       const breakEvenPct = !isClosed && stat.currentPrice > 0 ? ((breakEvenPrice / stat.currentPrice) - 1) * 100 : null;
                       const breakEvenPctStr = breakEvenPct !== null ? ` (${breakEvenPct > 0 ? '+' : ''}${breakEvenPct.toFixed(2)}%)` : '';
 
-                      let currentR = null;
+                      let rMultiple = null;
                       let baseRiskPctStr = '';
-                      if (!isClosed && stat.avgCost > 0 && stat.currentPrice > 0 && !isNaN(initialStop) && stat.avgCost > initialStop) {
-                          currentR = ((stat.currentPrice - stat.avgCost) / (stat.avgCost - initialStop)).toFixed(2);
-                          const baseRiskPct = ((stat.avgCost - initialStop) / stat.avgCost) * 100;
+                      if (!isClosed && stat.firstDayAvgCost > 0 && stat.currentPrice > 0 && !isNaN(initialStop) && stat.firstDayAvgCost > initialStop) {
+                          const riskUnit = stat.firstDayAvgCost - initialStop;
+                          rMultiple = ((stat.currentPrice - stat.avgCost) / riskUnit).toFixed(2);
+                          const baseRiskPct = (riskUnit / stat.firstDayAvgCost) * 100;
                           baseRiskPctStr = `<${baseRiskPct.toFixed(2)}%>`;
                       }
 
@@ -1653,7 +1672,7 @@ export default function App() {
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{stat.realizedPL >= 0 ? '+' : ''}{stat.realizedPL === 0 ? '--' : '$' + stat.realizedPL.toFixed(2)}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.openPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{isClosed ? '--' : (stat.openPL >= 0 ? '+' : '') + '$' + stat.openPL.toFixed(2)}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333', fontWeight: 'bold' }}>{isClosed ? '--' : '$' + breakEvenPrice.toFixed(2) + breakEvenPctStr}</td>
-                          <td style={{ padding: '12px 10px', textAlign: 'right', color: currentR > 0 ? '#2e7d32' : (currentR < 0 ? '#d32f2f' : '#333'), fontWeight: 'bold', whiteSpace: 'nowrap' }}>{isClosed ? '--' : (currentR !== null ? <>{baseRiskPctStr} {currentR}R</> : '--')}</td>
+                          <td style={{ padding: '12px 10px', textAlign: 'right', color: rMultiple > 0 ? '#2e7d32' : (rMultiple < 0 ? '#d32f2f' : '#333'), fontWeight: 'bold', whiteSpace: 'nowrap' }}>{isClosed ? '--' : (rMultiple !== null ? <>{baseRiskPctStr} {rMultiple}R</> : '--')}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'center', color: '#555' }}>{posWinRate}/{posLossRate} / {posPF}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333' }}>{displayDaysHeld}</td>
                           <td style={{ padding: '8px 10px', textAlign: 'right' }}>

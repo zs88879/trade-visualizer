@@ -85,6 +85,9 @@ export default function App() {
   
   const [tablePositionFilter, setTablePositionFilter] = useState('');
   const [tableStatusFilter, setTableStatusFilter] = useState('All');
+  
+  // --- New Sort State ---
+  const [sortConfig, setSortConfig] = useState({ key: 'Position', direction: 'asc' });
 
   const [stopPrices, setStopPrices] = useState({});
   const [tradeNotes, setTradeNotes] = useState({});
@@ -163,6 +166,14 @@ export default function App() {
     } else {
       setAuthError(true); setPasswordInput('');
     }
+  };
+
+  const requestSort = (key) => {
+    let direction = 'asc';
+    if (sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
   };
 
   // --- DB FETCHING FUNCTIONS ---
@@ -893,6 +904,125 @@ export default function App() {
     }
   }
 
+  // ============================================================================
+  // --- TABLE DATA PREPARATION & SORTING ENGINE ---
+  // ============================================================================
+  const tableData = Object.values(tickerStats)
+    .filter(stat => {
+      if (portfolioFilter !== 'All' && stat.ticker !== portfolioFilter) return false;
+      const isClosed = stat.qty === 0;
+      if (tableStatusFilter === 'OPEN' && isClosed) return false;
+      if (tableStatusFilter === 'CLOSED' && !isClosed) return false;
+      if (tableStatusFilter === 'All' && !showClosedPositions && isClosed) return false;
+      if (tablePositionFilter && !stat.ticker.toLowerCase().includes(tablePositionFilter.toLowerCase())) return false;
+      return true;
+    })
+    .map(stat => {
+      const totalTickerPositions = Object.values(tickerStats).filter(s => s.ticker === stat.ticker).length;
+      const displayName = totalTickerPositions > 1 ? `${stat.ticker} (#${stat.positionNum})` : stat.ticker;
+      const isClosed = stat.qty === 0;
+      
+      const posWinRate = stat.tradesClosed > 0 ? (stat.winningTrades / stat.tradesClosed) * 100 : 0;
+      const posLossRate = stat.tradesClosed > 0 ? (stat.losingTrades / stat.tradesClosed) * 100 : 0;
+      const posPF = stat.grossLoss === 0 ? (stat.grossProfit > 0 ? 999999 : 0) : (stat.grossProfit / stat.grossLoss);
+      
+      let daysHeldNum = 0;
+      if (isClosed && stat.sharesClosed > 0) { daysHeldNum = stat.totalDaysHeld / stat.sharesClosed; } 
+      else if (!isClosed && stat.qty > 0) {
+        const today = new Date(); let totalOpenDays = 0;
+        stat.openLots.forEach(lot => { const days = (today - lot.date) / (1000 * 60 * 60 * 24); totalOpenDays += Math.max(0, days) * lot.qty; });
+        daysHeldNum = totalOpenDays / stat.qty;
+      }
+
+      const stopData = stopPrices[stat.id] || {};
+      const stopPrice = parseFloat(stopData.current);
+      const initialStop = parseFloat(stopData.initial);
+
+      const openRisk = !isClosed && !isNaN(stopPrice) ? (stat.avgCost - stopPrice) * stat.qty : null;
+      const openHeat = !isClosed && !isNaN(stopPrice) && stat.currentPrice > 0 ? (stat.currentPrice - stopPrice) * stat.qty : null;
+      
+      const currentPosValue = stat.qty * (stat.currentPrice || stat.avgCost);
+      const tablePosSizePctNum = !isClosed && currentPortfolioValue > 0 ? (currentPosValue / currentPortfolioValue) * 100 : 0;
+      
+      const breakEvenPrice = !isClosed ? (stat.avgCost - (stat.realizedPL / stat.qty)) : null;
+      const breakEvenPct = !isClosed && stat.currentPrice > 0 ? ((breakEvenPrice / stat.currentPrice) - 1) * 100 : null;
+
+      let rMultipleNum = null;
+      if (!isClosed && stat.firstDayAvgCost > 0 && stat.currentPrice > 0 && !isNaN(initialStop) && stat.firstDayAvgCost > initialStop) {
+          const riskUnit = stat.firstDayAvgCost - initialStop;
+          rMultipleNum = (stat.currentPrice - stat.avgCost) / riskUnit;
+      }
+
+      return {
+        statObj: stat,
+        displayName,
+        isClosed,
+        posWinRate,
+        posLossRate,
+        posPF,
+        daysHeldNum,
+        stopData,
+        stopPrice,
+        initialStop,
+        openRisk,
+        openHeat,
+        tablePosSizePctNum,
+        breakEvenPrice,
+        breakEvenPct,
+        rMultipleNum,
+        sortValues: {
+          Position: displayName,
+          Status: isClosed ? 1 : 0, 
+          Qty: stat.qty,
+          AvgEntry: stat.avgCost,
+          PosPct: tablePosSizePctNum,
+          RealizedPL: stat.realizedPL,
+          OpenPL: isClosed ? -Infinity : stat.openPL,
+          BreakEven: breakEvenPrice !== null ? breakEvenPrice : -Infinity,
+          RMultiple: rMultipleNum !== null ? rMultipleNum : -Infinity,
+          WinLossPF: posPF,
+          DaysHeld: daysHeldNum,
+          InitialStop: isNaN(initialStop) ? -Infinity : initialStop,
+          StopPrice: isNaN(stopPrice) ? -Infinity : stopPrice,
+          OpenRisk: openRisk !== null ? openRisk : -Infinity,
+          OpenHeat: openHeat !== null ? openHeat : -Infinity,
+        }
+      };
+    });
+
+  tableData.sort((a, b) => {
+    const valA = a.sortValues[sortConfig.key];
+    const valB = b.sortValues[sortConfig.key];
+    
+    // Push -Infinity (N/A) values to the bottom regardless of Ascending/Descending
+    if (valA === -Infinity && valB !== -Infinity) return 1;
+    if (valB === -Infinity && valA !== -Infinity) return -1;
+    
+    if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+    if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+    
+    // Tie Breaker by Position String
+    if (a.sortValues.Position < b.sortValues.Position) return -1;
+    if (a.sortValues.Position > b.sortValues.Position) return 1;
+    return 0;
+  });
+
+  const renderSortableTH = (label, sortKey, align, title) => {
+      const isActive = sortConfig.key === sortKey;
+      return (
+          <th title={title} onClick={() => requestSort(sortKey)} style={{ padding: '12px 10px', textAlign: align, color: '#555', cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start' }}>
+                  {label}
+                  <span style={{ marginLeft: '4px', fontSize: '10px', color: isActive ? '#1565c0' : 'transparent' }}>
+                      {isActive && sortConfig.direction === 'desc' ? '▼' : '▲'}
+                  </span>
+              </div>
+          </th>
+      );
+  };
+  // ============================================================================
+
+
   if (!isAuthenticated) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', backgroundColor: '#f5f5f5', fontFamily: 'sans-serif' }}>
@@ -1311,7 +1441,6 @@ export default function App() {
                     baseRiskPctStr = `<${baseRiskPct.toFixed(2)}%>`;
                 }
                 
-                // NEW SIDEBAR POSITION SIZE % LOGIC
                 const currentPosValue = stat.qty * (stat.currentPrice || stat.avgCost);
                 const indPosSizePct = currentPortfolioValue > 0 ? ((currentPosValue / currentPortfolioValue) * 100).toFixed(2) + '%' : '--';
 
@@ -1592,101 +1721,72 @@ export default function App() {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px', minWidth: '950px' }}>
                 <thead>
                   <tr style={{ backgroundColor: '#f8f9fa', borderBottom: '2px solid #ddd', borderTop: '1px solid #ddd', position: 'sticky', top: 0, zIndex: 10 }}>
-                    <th style={{ padding: '12px 10px', textAlign: 'left', color: '#555' }}>Position</th>
-                    <th style={{ padding: '12px 10px', textAlign: 'center', color: '#555' }}>Status</th>
-                    <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Qty</th>
-                    <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Avg Entry</th>
-                    <th title="Percentage of Account Equity allocated to this position." style={{ padding: '12px 10px', textAlign: 'right', color: '#555', cursor: 'help' }}>Pos %</th>
-                    <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Realized P/L</th>
-                    <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Open P/L</th>
-                    <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Break-Even</th>
-                    <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>R Multiple</th>
-                    <th style={{ padding: '12px 10px', textAlign: 'center', color: '#555' }}>W/L % / PF</th>
-                    <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Days Held</th>
-                    <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Initial Stop</th>
-                    <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Stop Price</th>
-                    <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Open Risk</th>
-                    <th style={{ padding: '12px 10px', textAlign: 'right', color: '#555' }}>Open Heat</th>
+                    {renderSortableTH('Position', 'Position', 'left')}
+                    {renderSortableTH('Status', 'Status', 'center')}
+                    {renderSortableTH('Qty', 'Qty', 'right')}
+                    {renderSortableTH('Avg Entry', 'AvgEntry', 'right')}
+                    {renderSortableTH('Pos %', 'PosPct', 'right', 'Percentage of Account Equity allocated to this position.')}
+                    {renderSortableTH('Realized P/L', 'RealizedPL', 'right')}
+                    {renderSortableTH('Open P/L', 'OpenPL', 'right')}
+                    {renderSortableTH('Break-Even', 'BreakEven', 'right')}
+                    {renderSortableTH('R Multiple', 'RMultiple', 'right')}
+                    {renderSortableTH('W/L % / PF', 'WinLossPF', 'center')}
+                    {renderSortableTH('Days Held', 'DaysHeld', 'right')}
+                    {renderSortableTH('Initial Stop', 'InitialStop', 'right')}
+                    {renderSortableTH('Stop Price', 'StopPrice', 'right')}
+                    {renderSortableTH('Open Risk', 'OpenRisk', 'right')}
+                    {renderSortableTH('Open Heat', 'OpenHeat', 'right')}
                   </tr>
                 </thead>
                 <tbody>
-                  {Object.values(tickerStats)
-                    .filter(stat => {
-                      if (portfolioFilter !== 'All' && stat.ticker !== portfolioFilter) return false;
-                      const isClosed = stat.qty === 0;
-                      if (tableStatusFilter === 'OPEN' && isClosed) return false;
-                      if (tableStatusFilter === 'CLOSED' && !isClosed) return false;
-                      if (tableStatusFilter === 'All' && !showClosedPositions && isClosed) return false;
-                      if (tablePositionFilter && !stat.ticker.toLowerCase().includes(tablePositionFilter.toLowerCase())) return false;
-                      return true;
-                    })
-                    .sort((a, b) => a.ticker.localeCompare(b.ticker) || a.positionNum - b.positionNum)
-                    .map((stat, index) => {
-                      const totalTickerPositions = Object.values(tickerStats).filter(s => s.ticker === stat.ticker).length;
-                      const displayName = totalTickerPositions > 1 ? `${stat.ticker} (#${stat.positionNum})` : stat.ticker;
-                      const isClosed = stat.qty === 0;
+                  {tableData.map((row, index) => {
+                      const stat = row.statObj;
+                      const isClosed = row.isClosed;
                       
-                      const posWinRate = stat.tradesClosed > 0 ? ((stat.winningTrades / stat.tradesClosed) * 100).toFixed(0) + '%' : '--';
-                      const posLossRate = stat.tradesClosed > 0 ? ((stat.losingTrades / stat.tradesClosed) * 100).toFixed(0) + '%' : '--';
-                      const posPF = stat.grossLoss === 0 ? (stat.grossProfit > 0 ? 'MAX' : '--') : (stat.grossProfit / stat.grossLoss).toFixed(1);
+                      const displayWinRate = stat.tradesClosed > 0 ? row.posWinRate.toFixed(0) + '%' : '--';
+                      const displayLossRate = stat.tradesClosed > 0 ? row.posLossRate.toFixed(0) + '%' : '--';
+                      const displayPF = stat.grossLoss === 0 ? (stat.grossProfit > 0 ? 'MAX' : '--') : row.posPF.toFixed(1);
                       
                       let displayDaysHeld = '--';
-                      if (isClosed && stat.sharesClosed > 0) { displayDaysHeld = (stat.totalDaysHeld / stat.sharesClosed).toFixed(1); } 
-                      else if (!isClosed && stat.qty > 0) {
-                        const today = new Date(); let totalOpenDays = 0;
-                        stat.openLots.forEach(lot => { const days = (today - lot.date) / (1000 * 60 * 60 * 24); totalOpenDays += Math.max(0, days) * lot.qty; });
-                        displayDaysHeld = (totalOpenDays / stat.qty).toFixed(1);
-                      }
-
-                      const stopData = stopPrices[stat.id] || {};
-                      const stopPrice = parseFloat(stopData.current);
-                      const initialStop = parseFloat(stopData.initial);
-
-                      const openRisk = !isClosed && !isNaN(stopPrice) ? (stat.avgCost - stopPrice) * stat.qty : null;
-                      const openHeat = !isClosed && !isNaN(stopPrice) && stat.currentPrice > 0 ? (stat.currentPrice - stopPrice) * stat.qty : null;
+                      if (isClosed && stat.sharesClosed > 0) { displayDaysHeld = row.daysHeldNum.toFixed(1); } 
+                      else if (!isClosed && stat.qty > 0) { displayDaysHeld = row.daysHeldNum.toFixed(1); }
                       
-                      // NEW TABLE POSITION SIZE % LOGIC
-                      const currentPosValue = stat.qty * (stat.currentPrice || stat.avgCost);
-                      const tablePosSizePct = !isClosed && currentPortfolioValue > 0 ? ((currentPosValue / currentPortfolioValue) * 100).toFixed(2) + '%' : '--';
+                      const tablePosSizePctStr = !isClosed && currentPortfolioValue > 0 ? row.tablePosSizePctNum.toFixed(2) + '%' : '--';
                       
-                      const breakEvenPrice = !isClosed ? (stat.avgCost - (stat.realizedPL / stat.qty)) : null;
-                      const breakEvenPct = !isClosed && stat.currentPrice > 0 ? ((breakEvenPrice / stat.currentPrice) - 1) * 100 : null;
-                      const breakEvenPctStr = breakEvenPct !== null ? ` (${breakEvenPct > 0 ? '+' : ''}${breakEvenPct.toFixed(2)}%)` : '';
+                      const breakEvenPctStr = row.breakEvenPct !== null ? ` (${row.breakEvenPct > 0 ? '+' : ''}${row.breakEvenPct.toFixed(2)}%)` : '';
 
-                      let rMultiple = null;
                       let baseRiskPctStr = '';
-                      if (!isClosed && stat.firstDayAvgCost > 0 && stat.currentPrice > 0 && !isNaN(initialStop) && stat.firstDayAvgCost > initialStop) {
-                          const riskUnit = stat.firstDayAvgCost - initialStop;
-                          rMultiple = ((stat.currentPrice - stat.avgCost) / riskUnit).toFixed(2);
+                      if (!isClosed && stat.firstDayAvgCost > 0 && stat.currentPrice > 0 && !isNaN(row.initialStop) && stat.firstDayAvgCost > row.initialStop) {
+                          const riskUnit = stat.firstDayAvgCost - row.initialStop;
                           const baseRiskPct = (riskUnit / stat.firstDayAvgCost) * 100;
                           baseRiskPctStr = `<${baseRiskPct.toFixed(2)}%>`;
                       }
 
                       return (
                         <tr key={stat.id} style={{ borderBottom: '1px solid #eee', backgroundColor: index % 2 === 0 ? '#fff' : '#fafafa', transition: 'background-color 0.2s', cursor: 'pointer' }} onClick={() => { setSelectedTicker(stat.ticker); setActiveTab('chart'); setPortfolioFilter(stat.ticker); setHistoryFilter(stat.id); }} onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f1f8ff'} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = index % 2 === 0 ? '#fff' : '#fafafa'}>
-                          <td style={{ padding: '12px 10px', fontWeight: 'bold' }}>{displayName}</td>
+                          <td style={{ padding: '12px 10px', fontWeight: 'bold' }}>{row.displayName}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'center' }}><span style={{ padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 'bold', backgroundColor: isClosed ? '#e0e0e0' : '#bbdefb', color: isClosed ? '#666' : '#1565c0' }}>{isClosed ? 'CLOSED' : 'OPEN'}</span></td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 'bold' }}>{stat.qty}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333', fontWeight: 'bold' }}>{isClosed ? '--' : '$' + stat.avgCost.toFixed(2)}</td>
-                          <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333' }}>{tablePosSizePct}</td>
+                          <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333' }}>{tablePosSizePctStr}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{stat.realizedPL >= 0 ? '+' : ''}{stat.realizedPL === 0 ? '--' : '$' + stat.realizedPL.toFixed(2)}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.openPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{isClosed ? '--' : (stat.openPL >= 0 ? '+' : '') + '$' + stat.openPL.toFixed(2)}</td>
-                          <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333', fontWeight: 'bold' }}>{isClosed ? '--' : '$' + breakEvenPrice.toFixed(2) + breakEvenPctStr}</td>
-                          <td style={{ padding: '12px 10px', textAlign: 'right', color: rMultiple > 0 ? '#2e7d32' : (rMultiple < 0 ? '#d32f2f' : '#333'), fontWeight: 'bold', whiteSpace: 'nowrap' }}>{isClosed ? '--' : (rMultiple !== null ? <>{baseRiskPctStr} {rMultiple}R</> : '--')}</td>
-                          <td style={{ padding: '12px 10px', textAlign: 'center', color: '#555' }}>{posWinRate}/{posLossRate} / {posPF}</td>
+                          <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333', fontWeight: 'bold' }}>{isClosed ? '--' : '$' + row.breakEvenPrice.toFixed(2) + breakEvenPctStr}</td>
+                          <td style={{ padding: '12px 10px', textAlign: 'right', color: row.rMultipleNum > 0 ? '#2e7d32' : (row.rMultipleNum < 0 ? '#d32f2f' : '#333'), fontWeight: 'bold', whiteSpace: 'nowrap' }}>{isClosed ? '--' : (row.rMultipleNum !== null ? <>{baseRiskPctStr} {row.rMultipleNum.toFixed(2)}R</> : '--')}</td>
+                          <td style={{ padding: '12px 10px', textAlign: 'center', color: '#555' }}>{displayWinRate}/{displayLossRate} / {displayPF}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333' }}>{displayDaysHeld}</td>
                           <td style={{ padding: '8px 10px', textAlign: 'right' }}>
                             {isClosed ? '--' : (
-                              <input type="number" step="0.01" value={stopData.initial || ''} onChange={(e) => handleStopChange(stat.id, 'initial', e.target.value)} onBlur={() => syncStopData(stat.id)} onKeyDown={(e) => { if (e.key === 'Enter') { syncStopData(stat.id); e.target.blur(); } }} onClick={(e) => e.stopPropagation()} style={{ width: '70px', padding: '4px 6px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '13px', outline: 'none', textAlign: 'right' }} placeholder="0.00" />
+                              <input type="number" step="0.01" value={row.stopData.initial || ''} onChange={(e) => handleStopChange(stat.id, 'initial', e.target.value)} onBlur={() => syncStopData(stat.id)} onKeyDown={(e) => { if (e.key === 'Enter') { syncStopData(stat.id); e.target.blur(); } }} onClick={(e) => e.stopPropagation()} style={{ width: '70px', padding: '4px 6px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '13px', outline: 'none', textAlign: 'right' }} placeholder="0.00" />
                             )}
                           </td>
                           <td style={{ padding: '8px 10px', textAlign: 'right' }}>
                             {isClosed ? '--' : (
-                              <input type="number" step="0.01" value={stopData.current || ''} onChange={(e) => handleStopChange(stat.id, 'current', e.target.value)} onBlur={() => syncStopData(stat.id)} onKeyDown={(e) => { if (e.key === 'Enter') { syncStopData(stat.id); e.target.blur(); } }} onClick={(e) => e.stopPropagation()} style={{ width: '70px', padding: '4px 6px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '13px', outline: 'none', textAlign: 'right' }} placeholder="0.00" />
+                              <input type="number" step="0.01" value={row.stopData.current || ''} onChange={(e) => handleStopChange(stat.id, 'current', e.target.value)} onBlur={() => syncStopData(stat.id)} onKeyDown={(e) => { if (e.key === 'Enter') { syncStopData(stat.id); e.target.blur(); } }} onClick={(e) => e.stopPropagation()} style={{ width: '70px', padding: '4px 6px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '13px', outline: 'none', textAlign: 'right' }} placeholder="0.00" />
                             )}
                           </td>
-                          <td style={{ padding: '12px 10px', textAlign: 'right', color: openRisk === null ? '#aaa' : (openRisk > 0 ? '#d32f2f' : '#2e7d32'), fontWeight: 'bold' }}>{isClosed ? '--' : (openRisk !== null ? `$${openRisk.toFixed(2)}` : 'Set Stop')}</td>
-                          <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333', fontWeight: 'bold' }}>{isClosed ? '--' : (openHeat !== null ? `$${openHeat.toFixed(2)}` : 'Set Stop')}</td>
+                          <td style={{ padding: '12px 10px', textAlign: 'right', color: row.openRisk === null ? '#aaa' : (row.openRisk > 0 ? '#d32f2f' : '#2e7d32'), fontWeight: 'bold' }}>{isClosed ? '--' : (row.openRisk !== null ? `$${row.openRisk.toFixed(2)}` : 'Set Stop')}</td>
+                          <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333', fontWeight: 'bold' }}>{isClosed ? '--' : (row.openHeat !== null ? `$${row.openHeat.toFixed(2)}` : 'Set Stop')}</td>
                         </tr>
                       );
                   })}

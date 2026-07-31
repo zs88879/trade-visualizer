@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Papa from 'papaparse';
-import { createChart, CandlestickSeries, createSeriesMarkers } from 'lightweight-charts';
+import { createChart, CandlestickSeries, AreaSeries, createSeriesMarkers } from 'lightweight-charts';
 import { createClient } from '@supabase/supabase-js';
 
 // Initialize Supabase connection
@@ -102,6 +102,11 @@ export default function App() {
   const chartRef = useRef(null);
   const seriesRef = useRef(null);
   const markersRef = useRef(null); 
+
+  // --- Equity Curve Chart Ref ---
+  const equityChartContainerRef = useRef();
+  const equityChartRef = useRef(null);
+  const equitySeriesRef = useRef(null);
 
   // --- Modal States ---
   const [isCalcModalOpen, setIsCalcModalOpen] = useState(false);
@@ -747,7 +752,6 @@ export default function App() {
       const candlestickSeries = chart.addSeries(CandlestickSeries, { upColor: '#26a69a', downColor: '#ef5350', borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350' });
       chartRef.current = chart; seriesRef.current = candlestickSeries;
 
-      // Ensure chart flawlessly resizes to fill its new flexible 60% container bounds
       const resizeObserver = new ResizeObserver(entries => {
         if (entries.length === 0 || entries[0].target !== chartContainerRef.current) return;
         const newRect = entries[0].contentRect;
@@ -762,6 +766,91 @@ export default function App() {
       };
     }
   }, [isAuthenticated, activeTab]);
+
+  // Handle Equity Curve Chart Initialization & Data Plotting
+  useEffect(() => {
+    if (isAuthenticated && equityChartContainerRef.current && activeTab === 'equity-curve') {
+      const chart = createChart(equityChartContainerRef.current, {
+        width: equityChartContainerRef.current.clientWidth, 
+        height: equityChartContainerRef.current.clientHeight,
+        layout: { background: { color: '#ffffff' }, textColor: '#333', fontSize: 10 },
+        grid: { vertLines: { color: '#eee' }, horzLines: { color: '#eee' } },
+        rightPriceScale: { borderColor: '#ddd' },
+        timeScale: { borderColor: '#ddd' },
+      });
+      
+      const areaSeries = chart.addSeries(AreaSeries, { 
+        lineColor: '#1565c0', 
+        topColor: 'rgba(21, 101, 192, 0.4)', 
+        bottomColor: 'rgba(21, 101, 192, 0.0)',
+        lineWidth: 2 
+      });
+      
+      equityChartRef.current = chart; 
+      equitySeriesRef.current = areaSeries;
+
+      // Compute cumulative equity timeline from analyzedTrades & starting equity
+      const baseEquity = parseFloat(accountEquity) || 10000;
+      let runningPL = 0;
+      const datePLMap = {};
+
+      analyzedTrades.forEach(t => {
+        if (!datePLMap[t.formattedDate]) datePLMap[t.formattedDate] = 0;
+        // If it's a sell, we calculate realized P/L contribution for that day
+        // Or cleaner: map realized events from trades
+      });
+
+      // Let's aggregate daily cumulative realized P/L accurately
+      const dailyMap = {};
+      analyzedTrades.forEach(t => {
+        if (t['buy/sell'] === 'sell') {
+          // Find matching cycle stat to get average cost
+          const statObj = Object.values(tickerStats).find(s => s.ticker === t.ticker);
+          const avgCost = statObj ? statObj.avgCost : t.price; // fallback
+          const pl = t.quantity * (t.price - avgCost);
+          dailyMap[t.formattedDate] = (dailyMap[t.formattedDate] || 0) + pl;
+        }
+      });
+
+      const sortedDates = Object.keys(dailyMap).sort((a, b) => new Date(a) - new Date(b));
+      const equityData = [];
+      let currentVal = baseEquity;
+
+      // Add starting point if equityDate is available
+      if (equityDate) {
+        equityData.push({ time: equityDate, value: baseEquity });
+      }
+
+      sortedDates.forEach(dateStr => {
+        runningPL += dailyMap[dateStr];
+        currentVal = baseEquity + runningPL;
+        equityData.push({ time: dateStr, value: currentVal });
+      });
+
+      // If no closed trades yet, at least show starting equity today
+      if (equityData.length === 0) {
+        const todayStr = new Date().toISOString().split('T')[0];
+        equityData.push({ time: todayStr, value: baseEquity });
+      }
+
+      areaSeries.setData(equityData);
+      chart.timeScale().fitContent();
+
+      const resizeObserver = new ResizeObserver(entries => {
+        if (entries.length === 0 || entries[0].target !== equityChartContainerRef.current) return;
+        const newRect = entries[0].contentRect;
+        chart.applyOptions({ width: newRect.width, height: newRect.height });
+      });
+      resizeObserver.observe(equityChartContainerRef.current);
+
+      return () => { 
+        resizeObserver.disconnect(); 
+        chart.remove(); 
+        equityChartRef.current = null;
+        equitySeriesRef.current = null;
+      };
+    }
+  }, [isAuthenticated, activeTab, analyzedTrades, accountEquity, equityDate, tickerStats]);
 
   useEffect(() => {
     if (!selectedTicker || activeTab !== 'chart') return;
@@ -1002,14 +1091,12 @@ export default function App() {
     const valA = a.sortValues[sortConfig.key];
     const valB = b.sortValues[sortConfig.key];
     
-    // Push -Infinity (N/A) values to the bottom regardless of Ascending/Descending
     if (valA === -Infinity && valB !== -Infinity) return 1;
     if (valB === -Infinity && valA !== -Infinity) return -1;
     
     if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
     if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
     
-    // Tie Breaker by Position String
     if (a.sortValues.Position < b.sortValues.Position) return -1;
     if (a.sortValues.Position > b.sortValues.Position) return 1;
     return 0;
@@ -1700,13 +1787,14 @@ export default function App() {
           </div>
 
           {/* ----------------------------------------------- */}
-          {/* AREA 2: MIDDLE 60% - Main Content (Chart/Table) */}
+          {/* AREA 2: MIDDLE 60% - Main Content (Chart/Table/Equity Curve) */}
           {/* ----------------------------------------------- */}
           <div style={{ height: '60%', flexShrink: 0, display: 'flex', flexDirection: 'column', padding: '0 20px', boxSizing: 'border-box', overflow: 'hidden' }}>
             
             {/* TAB NAVIGATION */}
             <div style={{ display: 'flex', borderBottom: '1px solid #ddd', marginTop: '10px', marginBottom: '10px', flexShrink: 0 }}>
               <button onClick={() => setActiveTab('chart')} style={{ padding: '8px 16px', border: 'none', borderBottom: activeTab === 'chart' ? '3px solid #1565c0' : '3px solid transparent', backgroundColor: 'transparent', cursor: 'pointer', fontWeight: activeTab === 'chart' ? 'bold' : 'normal', color: activeTab === 'chart' ? '#1565c0' : '#555', fontSize: '14px' }}>Chart View</button>
+              <button onClick={() => setActiveTab('equity-curve')} style={{ padding: '8px 16px', border: 'none', borderBottom: activeTab === 'equity-curve' ? '3px solid #1565c0' : '3px solid transparent', backgroundColor: 'transparent', cursor: 'pointer', fontWeight: activeTab === 'equity-curve' ? 'bold' : 'normal', color: activeTab === 'equity-curve' ? '#1565c0' : '#555', fontSize: '14px' }}>Equity Curve</button>
               <button onClick={() => setActiveTab('table')} style={{ padding: '8px 16px', border: 'none', borderBottom: activeTab === 'table' ? '3px solid #1565c0' : '3px solid transparent', backgroundColor: 'transparent', cursor: 'pointer', fontWeight: activeTab === 'table' ? 'bold' : 'normal', color: activeTab === 'table' ? '#1565c0' : '#555', fontSize: '14px' }}>Table View</button>
               <button onClick={() => setActiveTab('monthly')} style={{ padding: '8px 16px', border: 'none', borderBottom: activeTab === 'monthly' ? '3px solid #1565c0' : '3px solid transparent', backgroundColor: 'transparent', cursor: 'pointer', fontWeight: activeTab === 'monthly' ? 'bold' : 'normal', color: activeTab === 'monthly' ? '#1565c0' : '#555', fontSize: '14px' }}>Monthly View</button>
             </div>
@@ -1718,6 +1806,16 @@ export default function App() {
               </div>
               <div style={{ flex: 1, position: 'relative' }}>
                 <div ref={chartContainerRef} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, border: '1px solid #ddd', borderRadius: '4px' }} />
+              </div>
+            </div>
+
+            {/* TAB: EQUITY CURVE */}
+            <div style={{ display: activeTab === 'equity-curve' ? 'flex' : 'none', flexDirection: 'column', flex: 1, overflow: 'hidden', paddingBottom: '15px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexShrink: 0 }}>
+                <h3 style={{ margin: 0, fontSize: '16px' }}>Portfolio Equity Curve ({selectedPortfolio})</h3>
+              </div>
+              <div style={{ flex: 1, position: 'relative' }}>
+                <div ref={equityChartContainerRef} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, border: '1px solid #ddd', borderRadius: '4px' }} />
               </div>
             </div>
 

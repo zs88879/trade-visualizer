@@ -949,6 +949,9 @@ export default function App() {
       const breakEvenPrice = !isClosed ? (stat.avgCost - (stat.realizedPL / stat.qty)) : null;
       const breakEvenPct = !isClosed && stat.currentPrice > 0 ? ((breakEvenPrice / stat.currentPrice) - 1) * 100 : null;
 
+      const openPLPctNum = !isClosed && stat.avgCost > 0 && stat.currentPrice > 0 ? ((stat.currentPrice - stat.avgCost) / stat.avgCost) * 100 : null;
+      const realizedPLPctNum = stat.totalClosedCost > 0 ? (stat.realizedPL / stat.totalClosedCost) * 100 : null;
+
       let rMultipleNum = null;
       if (!isClosed && stat.firstDayAvgCost > 0 && stat.currentPrice > 0 && !isNaN(initialStop) && stat.firstDayAvgCost > initialStop) {
           const riskUnit = stat.firstDayAvgCost - initialStop;
@@ -972,6 +975,8 @@ export default function App() {
         tablePosSizePctNum,
         breakEvenPrice,
         breakEvenPct,
+        openPLPctNum,
+        realizedPLPctNum,
         rMultipleNum,
         sortValues: {
           Position: displayName,
@@ -1450,6 +1455,9 @@ export default function App() {
                 const openHeat = !isNaN(stopPrice) && stat.currentPrice > 0 ? (stat.currentPrice - stopPrice) * stat.qty : null;
                 const openHeatPct = openHeat !== null && currentPortfolioValue > 0 ? ((openHeat / currentPortfolioValue) * 100).toFixed(2) : null;
 
+                const openPLPct = stat.avgCost > 0 && stat.currentPrice > 0 ? ((stat.currentPrice - stat.avgCost) / stat.avgCost) * 100 : null;
+                const realizedPLPct = stat.totalClosedCost > 0 ? (stat.realizedPL / stat.totalClosedCost) * 100 : null;
+
                 return (
                   <div key={stat.id} onClick={() => { setSelectedTicker(stat.ticker); setActiveTab('chart'); setPortfolioFilter(stat.ticker); setHistoryFilter(stat.id); }} style={{ padding: '12px', backgroundColor: '#fff', border: '1px solid #e0e0e0', borderRadius: '6px', marginBottom: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', cursor: 'pointer' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '16px', marginBottom: '8px' }}>
@@ -1458,12 +1466,18 @@ export default function App() {
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginBottom: '4px' }}>
                       <span style={{ color: '#555' }}>Realized P/L:</span>
-                      <span style={{ color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: '600' }}>{stat.realizedPL >= 0 ? '+' : ''}${stat.realizedPL.toFixed(2)}</span>
+                      <span style={{ color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: '600' }}>
+                        {stat.realizedPL >= 0 ? '+' : ''}${stat.realizedPL.toFixed(2)}
+                        {realizedPLPct !== null && stat.realizedPL !== 0 ? ` (${stat.realizedPL >= 0 ? '+' : ''}${realizedPLPct.toFixed(2)}%)` : ''}
+                      </span>
                     </div>
                     {stat.qty > 0 && (
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginBottom: '8px' }}>
                         <span style={{ color: '#555' }}>Open P/L:</span>
-                        <span style={{ color: stat.openPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: '600' }}>{stat.openPL >= 0 ? '+' : ''}${stat.openPL.toFixed(2)}</span>
+                        <span style={{ color: stat.openPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: '600' }}>
+                          {stat.openPL >= 0 ? '+' : ''}${stat.openPL.toFixed(2)}
+                          {openPLPct !== null ? ` (${stat.openPL >= 0 ? '+' : ''}${openPLPct.toFixed(2)}%)` : ''}
+                        </span>
                       </div>
                     )}
                     {stat.qty > 0 && (
@@ -1775,8 +1789,14 @@ export default function App() {
                           <td style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 'bold' }}>{stat.qty}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333', fontWeight: 'bold' }}>{isClosed ? '--' : '$' + stat.avgCost.toFixed(2)}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333' }}>{tablePosSizePctStr}</td>
-                          <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{stat.realizedPL >= 0 ? '+' : ''}{stat.realizedPL === 0 ? '--' : '$' + stat.realizedPL.toFixed(2)}</td>
-                          <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.openPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{isClosed ? '--' : (stat.openPL >= 0 ? '+' : '') + '$' + stat.openPL.toFixed(2)}</td>
+                          <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>
+                            {stat.realizedPL >= 0 ? '+' : ''}{stat.realizedPL === 0 ? '--' : '$' + stat.realizedPL.toFixed(2)}
+                            {row.realizedPLPctNum !== null && stat.realizedPL !== 0 ? <span style={{fontWeight: 'normal', color: '#555'}}><br/>({stat.realizedPL >= 0 ? '+' : ''}{row.realizedPLPctNum.toFixed(2)}%)</span> : ''}
+                          </td>
+                          <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.openPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>
+                            {isClosed ? '--' : (stat.openPL >= 0 ? '+' : '') + '$' + stat.openPL.toFixed(2)}
+                            {row.openPLPctNum !== null && !isClosed ? <span style={{fontWeight: 'normal', color: '#555'}}><br/>({stat.openPL >= 0 ? '+' : ''}{row.openPLPctNum.toFixed(2)}%)</span> : ''}
+                          </td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333', fontWeight: 'bold' }}>{isClosed ? '--' : '$' + row.breakEvenPrice.toFixed(2) + breakEvenPctStr}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: row.rMultipleNum > 0 ? '#2e7d32' : (row.rMultipleNum < 0 ? '#d32f2f' : '#333'), fontWeight: 'bold', whiteSpace: 'nowrap' }}>{isClosed ? '--' : (row.rMultipleNum !== null ? <>{baseRiskPctStr} {row.rMultipleNum.toFixed(2)}R</> : '--')}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'center', color: '#555' }}>{displayWinRate}/{displayLossRate} / {displayPF}</td>

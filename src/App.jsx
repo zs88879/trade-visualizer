@@ -580,7 +580,6 @@ export default function App() {
       }
 
       if (trade['buy/sell'] === 'buy') {
-        // Track first day exclusively
         if (!cycleData[posId].firstBuyDate) {
           cycleData[posId].firstBuyDate = trade.formattedDate;
         }
@@ -594,7 +593,7 @@ export default function App() {
         cycleData[posId].totalBuyCost += (trade.price * trade.quantity);
       } else if (trade['buy/sell'] === 'sell') {
         cycleData[posId].qtyTracker -= trade.quantity;
-        if (cycleData[posId].qtyTracker <= 0.0001) { // Close cycle cleanly
+        if (cycleData[posId].qtyTracker <= 0.0001) { 
           cycleData[posId].qtyTracker = 0;
           tempCounters[trade.ticker]++;
         }
@@ -640,7 +639,7 @@ export default function App() {
         s.qty += trade.quantity; 
         s.openLots.push({ date: tradeDate, qty: trade.quantity });
       } else if (trade['buy/sell'] === 'sell') {
-        const fixedAvgCost = s.avgCost; // Inherited correctly from Pass 1
+        const fixedAvgCost = s.avgCost; 
         const closedCost = fixedAvgCost * trade.quantity; 
         const pl = trade.quantity * (trade.price - fixedAvgCost);
         const plPct = fixedAvgCost > 0 ? (trade.price - fixedAvgCost) / fixedAvgCost : 0;
@@ -789,24 +788,15 @@ export default function App() {
       equityChartRef.current = chart; 
       equitySeriesRef.current = areaSeries;
 
-      // Compute cumulative equity timeline from analyzedTrades & starting equity
+      // Compute cumulative equity timeline accurately from closed trades
       const baseEquity = parseFloat(accountEquity) || 10000;
       let runningPL = 0;
-      const datePLMap = {};
-
-      analyzedTrades.forEach(t => {
-        if (!datePLMap[t.formattedDate]) datePLMap[t.formattedDate] = 0;
-        // If it's a sell, we calculate realized P/L contribution for that day
-        // Or cleaner: map realized events from trades
-      });
-
-      // Let's aggregate daily cumulative realized P/L accurately
       const dailyMap = {};
+
       analyzedTrades.forEach(t => {
         if (t['buy/sell'] === 'sell') {
-          // Find matching cycle stat to get average cost
           const statObj = Object.values(tickerStats).find(s => s.ticker === t.ticker);
-          const avgCost = statObj ? statObj.avgCost : t.price; // fallback
+          const avgCost = statObj ? statObj.avgCost : t.price; 
           const pl = t.quantity * (t.price - avgCost);
           dailyMap[t.formattedDate] = (dailyMap[t.formattedDate] || 0) + pl;
         }
@@ -814,23 +804,21 @@ export default function App() {
 
       const sortedDates = Object.keys(dailyMap).sort((a, b) => new Date(a) - new Date(b));
       const equityData = [];
-      let currentVal = baseEquity;
 
-      // Add starting point if equityDate is available
       if (equityDate) {
         equityData.push({ time: equityDate, value: baseEquity });
       }
 
       sortedDates.forEach(dateStr => {
-        runningPL += dailyMap[dateStr];
-        currentVal = baseEquity + runningPL;
-        equityData.push({ time: dateStr, value: currentVal });
+        if (!equityDate || dateStr >= equityDate) {
+          runningPL += dailyMap[dateStr];
+          equityData.push({ time: dateStr, value: baseEquity + runningPL });
+        }
       });
 
-      // If no closed trades yet, at least show starting equity today
       if (equityData.length === 0) {
         const todayStr = new Date().toISOString().split('T')[0];
-        equityData.push({ time: todayStr, value: baseEquity });
+        equityData.push({ time: equityDate || todayStr, value: baseEquity });
       }
 
       areaSeries.setData(equityData);
@@ -937,11 +925,9 @@ export default function App() {
   const globalSharesClosed = statsArray.reduce((sum, stat) => sum + stat.sharesClosed, 0);
   const globalAvgDaysHeld = globalSharesClosed > 0 ? (globalTotalDaysHeld / globalSharesClosed).toFixed(1) : 0;
 
-  // NEW DYNAMIC CURRENT PORTFOLIO VALUE MATH
   const totalOpenPL = statsArray.reduce((sum, stat) => sum + (stat.qty > 0 && stat.openPL ? stat.openPL : 0), 0);
   const currentPortfolioValue = parsedEquity > 0 ? (parsedEquity + totalRealizedPL + totalOpenPL) : 0;
 
-  // TOTAL INVESTED %
   const totalInvested = statsArray.reduce((sum, stat) => sum + (stat.qty * (stat.currentPrice || stat.avgCost)), 0);
   const totalPosPct = currentPortfolioValue > 0 ? ((totalInvested / currentPortfolioValue) * 100).toFixed(2) : '--';
 
@@ -961,7 +947,6 @@ export default function App() {
     return sum;
   }, 0);
 
-  // GLOBAL OPEN RISK & HEAT % (BASED ON REAL-TIME EQUITY)
   const globalRiskPct = currentPortfolioValue > 0 && totalOpenRisk > 0 ? ((totalOpenRisk / currentPortfolioValue) * 100).toFixed(2) : '--';
   const globalHeatPct = currentPortfolioValue > 0 && totalOpenHeat > 0 ? ((totalOpenHeat / currentPortfolioValue) * 100).toFixed(2) : '--';
 
@@ -1707,7 +1692,6 @@ export default function App() {
             {statsArray.length > 0 && (
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 
-                {/* NEW CURRENT PORTFOLIO VALUE CARD */}
                 <div title="Starting Cash + Net Realized P/L + Total Open P/L" style={{ flex: 1, minWidth: '130px', padding: '8px', backgroundColor: '#eceff1', borderRadius: '6px', border: '1px solid #cfd8dc', cursor: 'help' }}>
                   <div style={{ fontSize: '10px', color: '#37474f', textTransform: 'uppercase', fontWeight: 'bold' }}>Current Portfolio</div>
                   <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#263238' }}>{currentPortfolioValue > 0 ? `$${currentPortfolioValue.toFixed(2)}` : '--'}</div>
@@ -1748,7 +1732,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Row 2: Advanced Stats */}
                 <div style={{ flexBasis: '100%', height: '0' }}></div> 
                 
                 <div title="The largest peak-to-trough drop in your cumulative realized P/L." style={{ flex: 1, minWidth: '110px', padding: '8px', backgroundColor: '#ffebee', borderRadius: '6px', border: '1px solid #ffcdd2', cursor: 'help' }}>
@@ -1973,7 +1956,6 @@ export default function App() {
             {selectedTicker ? (
               <div style={{ paddingBottom: '20px' }}>
                 
-                {/* OPEN Position Analytics with NOTES */}
                 {Object.values(tickerStats)
                   .filter(stat => stat.ticker === selectedTicker && stat.qty > 0)
                   .map((stat) => {
@@ -2017,7 +1999,6 @@ export default function App() {
                   })
                 }
 
-                {/* CLOSED Position Analytics with NOTES */}
                 {Object.values(tickerStats)
                   .filter(stat => stat.ticker === selectedTicker && stat.qty === 0)
                   .map((stat) => {

@@ -639,7 +639,6 @@ export default function App() {
         const pl = trade.quantity * (trade.price - fixedAvgCost);
         const plPct = fixedAvgCost > 0 ? (trade.price - fixedAvgCost) / fixedAvgCost : 0;
         
-        // Respect equityDate cutoff for P&L tracking if configured
         const isAfterEquityDate = !equityDate || trade.formattedDate >= equityDate;
         if (isAfterEquityDate) {
           s.realizedPL += pl;
@@ -1634,7 +1633,9 @@ export default function App() {
                 </div>
                 <div title="Amount of open equity at risk: (Current Price - Stop Price) × Open Shares." style={{ flex: 1, minWidth: '110px', padding: '8px', backgroundColor: '#e3f2fd', borderRadius: '6px', border: '1px solid #bbdefb', cursor: 'help' }}>
                   <div style={{ fontSize: '10px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Total Open Heat</div>
-                  <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#1565c0' }}>${totalOpenHeat.toFixed(2)}</div>
+                  <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#1565c0' }}>
+                    {totalOpenHeat >= 0 ? '+' : '-'}${Math.abs(totalOpenHeat).toFixed(2)} <span style={{fontSize: '10px', fontWeight: 'normal'}}>{currentPortfolioValue > 0 ? `(${(totalOpenHeat / currentPortfolioValue * 100).toFixed(2)}%)` : ''}</span>
+                  </div>
                 </div>
                 <div title="Amount of initial capital at risk: (Avg Cost - Stop Price) × Open Shares. % is based on Account Equity." style={{ flex: 1, minWidth: '110px', padding: '8px', backgroundColor: '#fff3e0', borderRadius: '6px', border: '1px solid #ffe0b2', cursor: 'help' }}>
                   <div style={{ fontSize: '10px', color: '#e65100', textTransform: 'uppercase', fontWeight: 'bold' }}>Total Open Risk</div>

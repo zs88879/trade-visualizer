@@ -86,7 +86,7 @@ export default function App() {
   const [tablePositionFilter, setTablePositionFilter] = useState('');
   const [tableStatusFilter, setTableStatusFilter] = useState('All');
   
-  // --- New Sort State ---
+  // --- Sort State ---
   const [sortConfig, setSortConfig] = useState({ key: 'Position', direction: 'asc' });
 
   const [stopPrices, setStopPrices] = useState({});
@@ -852,7 +852,7 @@ export default function App() {
   const totalOpenPL = statsArray.reduce((sum, stat) => sum + (stat.qty > 0 && stat.openPL ? stat.openPL : 0), 0);
   const currentPortfolioValue = parsedEquity > 0 ? (parsedEquity + totalRealizedPL + totalOpenPL) : 0;
 
-  // TOTAL INVESTED % (NOW BASED ON REAL-TIME EQUITY & REAL-TIME POSITION VALUE)
+  // TOTAL INVESTED %
   const totalInvested = statsArray.reduce((sum, stat) => sum + (stat.qty * (stat.currentPrice || stat.avgCost)), 0);
   const totalPosPct = currentPortfolioValue > 0 ? ((totalInvested / currentPortfolioValue) * 100).toFixed(2) : '--';
 
@@ -872,8 +872,9 @@ export default function App() {
     return sum;
   }, 0);
 
-  // GLOBAL OPEN RISK % (NOW BASED ON REAL-TIME EQUITY)
+  // GLOBAL OPEN RISK & HEAT % (BASED ON REAL-TIME EQUITY)
   const globalRiskPct = currentPortfolioValue > 0 && totalOpenRisk > 0 ? ((totalOpenRisk / currentPortfolioValue) * 100).toFixed(2) : '--';
+  const globalHeatPct = currentPortfolioValue > 0 && totalOpenHeat > 0 ? ((totalOpenHeat / currentPortfolioValue) * 100).toFixed(2) : '--';
 
   const uniqueTickers = [...new Set(trades.map(t => t.ticker))].sort();
 
@@ -940,6 +941,7 @@ export default function App() {
 
       const openRisk = !isClosed && !isNaN(stopPrice) ? (stat.avgCost - stopPrice) * stat.qty : null;
       const openHeat = !isClosed && !isNaN(stopPrice) && stat.currentPrice > 0 ? (stat.currentPrice - stopPrice) * stat.qty : null;
+      const tableOpenHeatPctNum = openHeat !== null && currentPortfolioValue > 0 ? (openHeat / currentPortfolioValue) * 100 : null;
       
       const currentPosValue = stat.qty * (stat.currentPrice || stat.avgCost);
       const tablePosSizePctNum = !isClosed && currentPortfolioValue > 0 ? (currentPosValue / currentPortfolioValue) * 100 : 0;
@@ -966,6 +968,7 @@ export default function App() {
         initialStop,
         openRisk,
         openHeat,
+        tableOpenHeatPctNum,
         tablePosSizePctNum,
         breakEvenPrice,
         breakEvenPct,
@@ -1445,6 +1448,7 @@ export default function App() {
                 const indPosSizePct = currentPortfolioValue > 0 ? ((currentPosValue / currentPortfolioValue) * 100).toFixed(2) + '%' : '--';
 
                 const openHeat = !isNaN(stopPrice) && stat.currentPrice > 0 ? (stat.currentPrice - stopPrice) * stat.qty : null;
+                const openHeatPct = openHeat !== null && currentPortfolioValue > 0 ? ((openHeat / currentPortfolioValue) * 100).toFixed(2) : null;
 
                 return (
                   <div key={stat.id} onClick={() => { setSelectedTicker(stat.ticker); setActiveTab('chart'); setPortfolioFilter(stat.ticker); setHistoryFilter(stat.id); }} style={{ padding: '12px', backgroundColor: '#fff', border: '1px solid #e0e0e0', borderRadius: '6px', marginBottom: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', cursor: 'pointer' }}>
@@ -1506,7 +1510,7 @@ export default function App() {
                         {openHeat !== null && (
                           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginTop: '4px' }}>
                             <span style={{ color: '#555' }}>Open Heat:</span>
-                            <span style={{ color: '#333', fontWeight: 'bold' }}>${openHeat.toFixed(2)}</span>
+                            <span style={{ color: '#333', fontWeight: 'bold' }}>${openHeat.toFixed(2)} ({openHeatPct}%)</span>
                           </div>
                         )}
                       </div>
@@ -1630,9 +1634,11 @@ export default function App() {
                     ${totalInvested.toFixed(0)} <span style={{fontSize: '10px', fontWeight: 'normal'}}>({totalPosPct}%)</span>
                   </div>
                 </div>
-                <div title="Amount of open equity at risk: (Current Price - Stop Price) × Open Shares." style={{ flex: 1, minWidth: '110px', padding: '8px', backgroundColor: '#e3f2fd', borderRadius: '6px', border: '1px solid #bbdefb', cursor: 'help' }}>
+                <div title="Amount of open equity at risk: (Current Price - Stop Price) × Open Shares. % is based on Account Equity." style={{ flex: 1, minWidth: '110px', padding: '8px', backgroundColor: '#e3f2fd', borderRadius: '6px', border: '1px solid #bbdefb', cursor: 'help' }}>
                   <div style={{ fontSize: '10px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Total Open Heat</div>
-                  <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#1565c0' }}>${totalOpenHeat.toFixed(2)}</div>
+                  <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#1565c0' }}>
+                    ${totalOpenHeat.toFixed(2)} <span style={{fontSize: '10px', fontWeight: 'normal'}}>({globalHeatPct}%)</span>
+                  </div>
                 </div>
                 <div title="Amount of initial capital at risk: (Avg Cost - Stop Price) × Open Shares. % is based on Account Equity." style={{ flex: 1, minWidth: '110px', padding: '8px', backgroundColor: '#fff3e0', borderRadius: '6px', border: '1px solid #ffe0b2', cursor: 'help' }}>
                   <div style={{ fontSize: '10px', color: '#e65100', textTransform: 'uppercase', fontWeight: 'bold' }}>Total Open Risk</div>
@@ -1786,7 +1792,7 @@ export default function App() {
                             )}
                           </td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: row.openRisk === null ? '#aaa' : (row.openRisk > 0 ? '#d32f2f' : '#2e7d32'), fontWeight: 'bold' }}>{isClosed ? '--' : (row.openRisk !== null ? `$${row.openRisk.toFixed(2)}` : 'Set Stop')}</td>
-                          <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333', fontWeight: 'bold' }}>{isClosed ? '--' : (row.openHeat !== null ? `$${row.openHeat.toFixed(2)}` : 'Set Stop')}</td>
+                          <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{isClosed ? '--' : (row.openHeat !== null ? `$${row.openHeat.toFixed(2)} (${row.tableOpenHeatPctNum.toFixed(2)}%)` : 'Set Stop')}</td>
                         </tr>
                       );
                   })}

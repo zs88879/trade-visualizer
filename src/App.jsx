@@ -693,7 +693,7 @@ export default function App() {
         mStats[key].eomEquity = parsedBaseEquity > 0 ? parsedBaseEquity + runningPL : 0;
     });
 
-    // Build Daily Equity Curve Timeline
+    // Build Daily Equity Curve Timeline including Today's Live Portfolio Value
     realizedEvents.sort((a, b) => a.dateObj - b.dateObj);
     let cumulativeCurvePL = parsedBaseEquity > 0 ? parsedBaseEquity : 0;
     const curveMap = {};
@@ -701,6 +701,14 @@ export default function App() {
       cumulativeCurvePL += e.pl;
       curveMap[e.date] = cumulativeCurvePL;
     });
+
+    // Add current live point for today so curve matches current portfolio value
+    const todayStr = new Date().toISOString().split('T')[0];
+    const totalOpenPLCalc = Object.values(stats).reduce((sum, st) => sum + (st.qty > 0 && st.openPL ? st.openPL : 0), 0);
+    const livePortfolioValue = parsedBaseEquity > 0 ? (parsedBaseEquity + totalRealizedPL + totalOpenPLCalc) : 0;
+    if (livePortfolioValue > 0) {
+      curveMap[todayStr] = livePortfolioValue;
+    }
     
     const formattedEquityCurve = Object.keys(curveMap).sort().map(dateStr => ({
       time: dateStr,
@@ -1403,9 +1411,7 @@ export default function App() {
       {/* MAIN LAYOUT WRAPPER */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         
-        {/* ======================================================== */}
         {/* LEFT SIDEBAR: Static Width */}
-        {/* ======================================================== */}
         <div style={{ width: '360px', flexShrink: 0, borderRight: '1px solid #ddd', overflowY: 'auto', padding: '15px', backgroundColor: '#fafafa' }}>
           {Object.keys(tickerStats).length > 0 && (
             <div style={{ marginBottom: '25px' }}>
@@ -1472,6 +1478,7 @@ export default function App() {
                 const indPosSizePct = currentPortfolioValue > 0 ? ((currentPosValue / currentPortfolioValue) * 100).toFixed(2) + '%' : '--';
 
                 const openHeat = !isNaN(stopPrice) && stat.currentPrice > 0 ? (stat.currentPrice - stopPrice) * stat.qty : null;
+                const openHeatPctVal = currentPortfolioValue > 0 && openHeat !== null ? ((openHeat / currentPortfolioValue) * 100).toFixed(2) : '0.00';
                 const openPLPct = stat.qty > 0 && stat.avgCost > 0 && stat.currentPrice > 0 ? ((stat.currentPrice - stat.avgCost) / stat.avgCost) * 100 : 0;
 
                 return (
@@ -1533,8 +1540,8 @@ export default function App() {
                         )}
                         {openHeat !== null && (
                           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginTop: '4px' }}>
-                            <span style={{ color: '#555' }}>Open Heat:</span>
-                            <span style={{ color: '#333', fontWeight: 'bold' }}>${openHeat.toFixed(2)}</span>
+                            <span style={{ color: '#555' }}>Open Heat %:</span>
+                            <span style={{ color: '#1565c0', fontWeight: 'bold' }}>${openHeat.toFixed(2)} ({openHeatPctVal}%)</span>
                           </div>
                         )}
                       </div>
@@ -1618,9 +1625,7 @@ export default function App() {
           </ul>
         </div>
 
-        {/* ======================================================== */}
         {/* RIGHT CONTENT AREA: 20% / 60% / 20% Strict Flex Layout */}
-        {/* ======================================================== */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#fff', overflow: 'hidden' }}>
           
           {/* ----------------------------------------------- */}

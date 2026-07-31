@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Papa from 'papaparse';
-import { createChart, CandlestickSeries, createSeriesMarkers } from 'lightweight-charts';
+import { createChart, CandlestickSeries, LineSeries, createSeriesMarkers } from 'lightweight-charts';
 import { createClient } from '@supabase/supabase-js';
 
 // Initialize Supabase connection
@@ -76,6 +76,7 @@ export default function App() {
   const [selectedTicker, setSelectedTicker] = useState(null);
   const [tickerStats, setTickerStats] = useState({}); 
   const [monthlyStats, setMonthlyStats] = useState({}); 
+  const [equityCurveData, setEquityCurveData] = useState([]);
   const [showClosedPositions, setShowClosedPositions] = useState(true);
   
   const [startDate, setStartDate] = useState('');
@@ -102,6 +103,10 @@ export default function App() {
   const chartRef = useRef(null);
   const seriesRef = useRef(null);
   const markersRef = useRef(null); 
+
+  const equityChartContainerRef = useRef();
+  const equityChartRef = useRef(null);
+  const equitySeriesRef = useRef(null);
 
   // --- Modal States ---
   const [isCalcModalOpen, setIsCalcModalOpen] = useState(false);
@@ -256,7 +261,6 @@ export default function App() {
     } catch (error) { console.error("Error fetching from DB:", error.message); }
   };
 
-  // Fetch data when portfolio or date range changes
   useEffect(() => { 
     if (isAuthenticated) { 
       setTrades([]); 
@@ -274,7 +278,6 @@ export default function App() {
     } 
   }, [startDate, endDate, isAuthenticated, selectedPortfolio]);
 
-  // --- SYNC FUNCTIONS ---
   const handleStopChange = (posId, field, value) => {
     setStopPrices(prev => ({
       ...prev,
@@ -286,7 +289,6 @@ export default function App() {
     const data = stopPrices[posId] || {};
     const currentVal = parseFloat(data.current);
     const initialVal = parseFloat(data.initial);
-    
     const isEmpty = isNaN(currentVal) && isNaN(initialVal);
     
     try {
@@ -300,7 +302,7 @@ export default function App() {
           initial_stop: isNaN(initialVal) ? null : initialVal
         });
       }
-    } catch (error) { console.error("Network or code error syncing stops:", error.message); }
+    } catch (error) { console.error("Error syncing stops:", error.message); }
   };
 
   const handleNoteDataChange = (posId, field, value) => {
@@ -326,10 +328,9 @@ export default function App() {
           feedback: currentData.feedback
         });
       }
-    } catch (error) { console.error("Error syncing trade note to DB:", error.message); }
+    } catch (error) { console.error("Error syncing trade note:", error.message); }
   };
 
-  // --- LIST MODIFICATION HANDLERS ---
   const handleAddPortfolio = () => {
     const trimmed = newPortfolio.trim();
     if (trimmed && !portfolios.includes(trimmed)) {
@@ -381,7 +382,6 @@ export default function App() {
     updateSettingInDB('feedbacks', updated);
   };
 
-  // --- MANUAL ENTRY HANDLER ---
   const handleManualTradeSubmit = async (e) => {
     e.preventDefault();
     if (!manualTradeDate || !manualTradeTicker || !manualTradePrice || !manualTradeQty) {
@@ -421,7 +421,6 @@ export default function App() {
     }
   };
 
-  // --- UPLOAD HANDLER ---
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -445,7 +444,7 @@ export default function App() {
               return { portfolio: selectedPortfolio, trade_date: formattedDate, ticker: ticker, action: row[5].toLowerCase().trim(), price: parseFloat(row[8]), quantity: Math.abs(parseInt(row[7], 10)) };
             });
           } else if (uploadFormat === 'Questrade') {
-            alert("Questrade parsing logic coming soon! Please provide a sample file.");
+            alert("Questrade parsing logic coming soon!");
             setIsUploadModalOpen(false); event.target.value = null; return;
           } else {
             dbTrades = results.data.filter(trade => trade.date && trade.ticker).map((trade) => {
@@ -457,8 +456,7 @@ export default function App() {
           if (dbTrades.length === 0) { alert(`No valid trades found.`); event.target.value = null; return; }
           const uniqueDates = [...new Set(dbTrades.map(trade => trade.trade_date))];
           
-          const confirmMessage = `WARNING: You are uploading trades to [${selectedPortfolio}] spanning ${uniqueDates.length} distinct dates.\n\nThis will OVERWRITE existing trade history on these specific dates for this portfolio. Custom notes tied to overwritten cycles may disconnect.\n\nProceed with upload?`;
-          if (!window.confirm(confirmMessage)) { event.target.value = null; return; }
+          if (!window.confirm(`Proceed with uploading trades to [${selectedPortfolio}]?`)) { event.target.value = null; return; }
 
           await supabase.from('trades').delete().in('trade_date', uniqueDates).eq('portfolio', selectedPortfolio);
           const { error } = await supabase.from('trades').insert(dbTrades);
@@ -500,8 +498,6 @@ export default function App() {
           "Break-Even %": breakEvenPct !== null ? breakEvenPct.toFixed(2) + '%' : "N/A",
           "R Multiple": rMultiple !== null ? `${baseRiskPctStr} ${rMultiple}R` : "N/A",
           "Gross Profit ($)": stat.grossProfit.toFixed(2), "Gross Loss ($)": stat.grossLoss.toFixed(2), 
-          "Win % (>0.5%)": stat.tradesClosed > 0 ? ((stat.winningTrades / stat.tradesClosed) * 100).toFixed(0) + '%' : "N/A",
-          "Loss % (<-0.5%)": stat.tradesClosed > 0 ? ((stat.losingTrades / stat.tradesClosed) * 100).toFixed(0) + '%' : "N/A",
           "Total Trades in Cycle": stat.tradesClosed, 
           "Initial Stop": stopData.initial || "None",
           "Stop Price": stopData.current || "None", 
@@ -553,7 +549,7 @@ export default function App() {
 
   useEffect(() => {
     if (trades.length === 0) {
-      setTickerStats({}); setMonthlyStats({}); setAnalyzedTrades([]); 
+      setTickerStats({}); setMonthlyStats({}); setAnalyzedTrades([]); setEquityCurveData([]);
       setAdvancedStats({ maxDD: 0, maxWinStreak: 0, maxLossStreak: 0, avgWinDays: 0, avgLossDays: 0 });
       return;
     }
@@ -655,7 +651,7 @@ export default function App() {
         else if (plPct < -0.005) s.losingTrades++;
 
         if (isAfterEquityDate) {
-          realizedEvents.push({ date: tradeDate, pl: pl, plPct: plPct }); 
+          realizedEvents.push({ date: trade.formattedDate, dateObj: tradeDate, pl: pl, plPct: plPct }); 
         }
 
         const yyyy = tradeDate.getFullYear(); const mm = String(tradeDate.getMonth() + 1).padStart(2, '0'); const monthKey = `${yyyy}-${mm}`; 
@@ -697,9 +693,23 @@ export default function App() {
         mStats[key].eomEquity = parsedBaseEquity > 0 ? parsedBaseEquity + runningPL : 0;
     });
 
+    // Build Daily Equity Curve Timeline
+    realizedEvents.sort((a, b) => a.dateObj - b.dateObj);
+    let cumulativeCurvePL = parsedBaseEquity > 0 ? parsedBaseEquity : 0;
+    const curveMap = {};
+    realizedEvents.forEach(e => {
+      cumulativeCurvePL += e.pl;
+      curveMap[e.date] = cumulativeCurvePL;
+    });
+    
+    const formattedEquityCurve = Object.keys(curveMap).sort().map(dateStr => ({
+      time: dateStr,
+      value: curveMap[dateStr]
+    }));
+    setEquityCurveData(formattedEquityCurve);
+
     setMonthlyStats(mStats); setAnalyzedTrades(enrichedTradesList);
 
-    realizedEvents.sort((a, b) => a.date - b.date);
     let peak = 0; let maxDD = 0; let cumulative = 0; let curWin = 0, maxWinStreak = 0; let curLoss = 0, maxLossStreak = 0;
     realizedEvents.forEach(e => {
       cumulative += e.pl; if (cumulative > peak) peak = cumulative;
@@ -769,6 +779,34 @@ export default function App() {
       };
     }
   }, [isAuthenticated, activeTab]);
+
+  // Handle Equity Curve Chart Init
+  useEffect(() => {
+    if (isAuthenticated && equityChartContainerRef.current && activeTab === 'equityCurve' && equityCurveData.length > 0) {
+      const chart = createChart(equityChartContainerRef.current, {
+        width: equityChartContainerRef.current.clientWidth,
+        height: equityChartContainerRef.current.clientHeight,
+        layout: { background: { color: '#ffffff' }, textColor: '#333', fontSize: 10 },
+        grid: { vertLines: { color: '#eee' }, horzLines: { color: '#eee' } },
+      });
+      const lineSeries = chart.addSeries(LineSeries, { color: '#1565c0', lineWidth: 2 });
+      lineSeries.setData(equityCurveData);
+      chart.timeScale().fitContent();
+      equityChartRef.current = chart; equitySeriesRef.current = lineSeries;
+
+      const resizeObserver = new ResizeObserver(entries => {
+        if (entries.length === 0 || entries[0].target !== equityChartContainerRef.current) return;
+        const newRect = entries[0].contentRect;
+        chart.applyOptions({ width: newRect.width, height: newRect.height });
+      });
+      resizeObserver.observe(equityChartContainerRef.current);
+
+      return () => {
+        resizeObserver.disconnect();
+        chart.remove();
+      };
+    }
+  }, [isAuthenticated, activeTab, equityCurveData]);
 
   useEffect(() => {
     if (!selectedTicker || activeTab !== 'chart') return;
@@ -878,6 +916,7 @@ export default function App() {
   }, 0);
 
   const globalRiskPct = currentPortfolioValue > 0 && totalOpenRisk > 0 ? ((totalOpenRisk / currentPortfolioValue) * 100).toFixed(2) : '--';
+  const totalOpenHeatPct = currentPortfolioValue > 0 && totalOpenHeat !== 0 ? ((totalOpenHeat / currentPortfolioValue) * 100).toFixed(2) : '0.00';
 
   const uniqueTickers = [...new Set(trades.map(t => t.ticker))].sort();
 
@@ -950,6 +989,7 @@ export default function App() {
       
       const breakEvenPrice = !isClosed ? (stat.avgCost - (stat.realizedPL / stat.qty)) : null;
       const breakEvenPct = !isClosed && stat.currentPrice > 0 ? ((breakEvenPrice / stat.currentPrice) - 1) * 100 : null;
+      const openPLPct = !isClosed && stat.avgCost > 0 && stat.currentPrice > 0 ? ((stat.currentPrice - stat.avgCost) / stat.avgCost) * 100 : 0;
 
       let rMultipleNum = null;
       if (!isClosed && stat.firstDayAvgCost > 0 && stat.currentPrice > 0 && !isNaN(initialStop) && stat.firstDayAvgCost > initialStop) {
@@ -973,6 +1013,7 @@ export default function App() {
         tablePosSizePctNum,
         breakEvenPrice,
         breakEvenPct,
+        openPLPct,
         rMultipleNum,
         sortValues: {
           Position: displayName,
@@ -982,6 +1023,7 @@ export default function App() {
           PosPct: tablePosSizePctNum,
           RealizedPL: stat.realizedPL,
           OpenPL: isClosed ? -Infinity : stat.openPL,
+          OpenPLPct: isClosed ? -Infinity : openPLPct,
           BreakEven: breakEvenPrice !== null ? breakEvenPrice : -Infinity,
           RMultiple: rMultipleNum !== null ? rMultipleNum : -Infinity,
           WinLossPF: posPF,
@@ -1068,39 +1110,23 @@ export default function App() {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap' }}>
-          <button onClick={() => setIsCalcModalOpen(true)} style={{ padding: '8px 12px', backgroundColor: '#2e7d32', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            Calculator
-          </button>
-          <button onClick={() => setIsOutlookModalOpen(true)} style={{ padding: '8px 12px', backgroundColor: '#f57c00', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            Company Outlook
-          </button>
-          <button onClick={() => setIsEntryMethodModalOpen(true)} style={{ padding: '8px 12px', backgroundColor: '#8e24aa', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            Entry Methods
-          </button>
-          <button onClick={() => setIsFeedbackModalOpen(true)} style={{ padding: '8px 12px', backgroundColor: '#00897b', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            Feedback Tags
-          </button>
-          <button onClick={handleExportCSV} style={{ padding: '8px 12px', backgroundColor: '#1565c0', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            Export Journal
-          </button>
-          <button onClick={() => { setManualTradePortfolio(selectedPortfolio); setIsManualEntryModalOpen(true); }} style={{ padding: '8px 12px', backgroundColor: '#43a047', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            Manual Entry
-          </button>
-          <button onClick={() => setIsUploadModalOpen(true)} style={{ padding: '8px 12px', backgroundColor: '#5c6bc0', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            Upload Transaction
-          </button>
+          <button onClick={() => setIsCalcModalOpen(true)} style={{ padding: '8px 12px', backgroundColor: '#2e7d32', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>Calculator</button>
+          <button onClick={() => setIsOutlookModalOpen(true)} style={{ padding: '8px 12px', backgroundColor: '#f57c00', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>Company Outlook</button>
+          <button onClick={() => setIsEntryMethodModalOpen(true)} style={{ padding: '8px 12px', backgroundColor: '#8e24aa', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>Entry Methods</button>
+          <button onClick={() => setIsFeedbackModalOpen(true)} style={{ padding: '8px 12px', backgroundColor: '#00897b', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>Feedback Tags</button>
+          <button onClick={handleExportCSV} style={{ padding: '8px 12px', backgroundColor: '#1565c0', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>Export Journal</button>
+          <button onClick={() => { setManualTradePortfolio(selectedPortfolio); setIsManualEntryModalOpen(true); }} style={{ padding: '8px 12px', backgroundColor: '#43a047', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>Manual Entry</button>
+          <button onClick={() => setIsUploadModalOpen(true)} style={{ padding: '8px 12px', backgroundColor: '#5c6bc0', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>Upload Transaction</button>
           
           <div style={{ borderLeft: '2px solid #ddd', height: '24px' }}></div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div title={`Starting Equity and As-of Date for ${selectedPortfolio}.`} style={{ display: 'flex', alignItems: 'center', backgroundColor: '#e3f2fd', padding: '4px 8px', borderRadius: '4px', border: '1px solid #90caf9' }}>
+            <div style={{ display: 'flex', alignItems: 'center', backgroundColor: '#e3f2fd', padding: '4px 8px', borderRadius: '4px', border: '1px solid #90caf9' }}>
               <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#1565c0', marginRight: '6px', textTransform: 'uppercase' }}>Start Equity:</label>
               <span style={{color: '#1565c0', fontSize:'12px', fontWeight:'bold', marginRight:'2px'}}>$</span>
               <input type="number" value={accountEquity} onChange={(e) => setAccountEquity(e.target.value)} style={{ padding: '4px', borderRadius: '4px', border: '1px solid #ccc', width: '80px', outline: 'none', fontSize: '12px' }} placeholder="100000" />
-              <input type="date" title="As of Date" value={equityDate} onChange={(e) => setEquityDate(e.target.value)} style={{ marginLeft: '6px', padding: '3px', borderRadius: '4px', border: '1px solid #ccc', outline: 'none', fontSize: '11px', color: '#333' }} />
+              <input type="date" value={equityDate} onChange={(e) => setEquityDate(e.target.value)} style={{ marginLeft: '6px', padding: '3px', borderRadius: '4px', border: '1px solid #ccc', outline: 'none', fontSize: '11px', color: '#333' }} />
             </div>
-
-            <div style={{ borderLeft: '2px solid #ddd', height: '24px', margin: '0 5px' }}></div>
 
             <div style={{ display: 'flex', alignItems: 'center' }}>
               <label style={{ fontSize: '12px', fontWeight: 'bold', color: '#555', marginRight: '6px', textTransform: 'uppercase' }}>Start:</label>
@@ -1112,7 +1138,6 @@ export default function App() {
             </div>
             <button onClick={() => { setStartDate(''); setEndDate(''); }} style={{ padding: '6px 10px', fontSize: '12px', cursor: 'pointer', backgroundColor: '#e0e0e0', border: 'none', borderRadius: '4px' }}>Clear</button>
           </div>
-          <div style={{ borderLeft: '2px solid #ddd', height: '24px' }}></div>
           <button onClick={() => setIsAuthenticated(false)} style={{ padding: '6px 12px', backgroundColor: '#f44336', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>Lock</button>
         </div>
       </div>
@@ -1447,6 +1472,7 @@ export default function App() {
                 const indPosSizePct = currentPortfolioValue > 0 ? ((currentPosValue / currentPortfolioValue) * 100).toFixed(2) + '%' : '--';
 
                 const openHeat = !isNaN(stopPrice) && stat.currentPrice > 0 ? (stat.currentPrice - stopPrice) * stat.qty : null;
+                const openPLPct = stat.qty > 0 && stat.avgCost > 0 && stat.currentPrice > 0 ? ((stat.currentPrice - stat.avgCost) / stat.avgCost) * 100 : 0;
 
                 return (
                   <div key={stat.id} onClick={() => { setSelectedTicker(stat.ticker); setActiveTab('chart'); setPortfolioFilter(stat.ticker); setHistoryFilter(stat.id); }} style={{ padding: '12px', backgroundColor: '#fff', border: '1px solid #e0e0e0', borderRadius: '6px', marginBottom: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', cursor: 'pointer' }}>
@@ -1461,7 +1487,7 @@ export default function App() {
                     {stat.qty > 0 && (
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginBottom: '8px' }}>
                         <span style={{ color: '#555' }}>Open P/L:</span>
-                        <span style={{ color: stat.openPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: '600' }}>{stat.openPL >= 0 ? '+' : ''}${stat.openPL.toFixed(2)}</span>
+                        <span style={{ color: stat.openPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: '600' }}>{stat.openPL >= 0 ? '+' : ''}${stat.openPL.toFixed(2)} ({openPLPct >= 0 ? '+' : ''}{openPLPct.toFixed(2)}%)</span>
                       </div>
                     )}
                     {stat.qty > 0 && (
@@ -1634,7 +1660,7 @@ export default function App() {
                 <div title="Amount of open equity at risk: (Current Price - Stop Price) × Open Shares." style={{ flex: 1, minWidth: '110px', padding: '8px', backgroundColor: '#e3f2fd', borderRadius: '6px', border: '1px solid #bbdefb', cursor: 'help' }}>
                   <div style={{ fontSize: '10px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Total Open Heat</div>
                   <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#1565c0' }}>
-                    {totalOpenHeat >= 0 ? '+' : '-'}${Math.abs(totalOpenHeat).toFixed(2)} <span style={{fontSize: '10px', fontWeight: 'normal'}}>{currentPortfolioValue > 0 ? `(${(totalOpenHeat / currentPortfolioValue * 100).toFixed(2)}%)` : ''}</span>
+                    {totalOpenHeat >= 0 ? '+' : '-'}${Math.abs(totalOpenHeat).toFixed(2)} <span style={{fontSize: '10px', fontWeight: 'normal'}}>({totalOpenHeatPct}%)</span>
                   </div>
                 </div>
                 <div title="Amount of initial capital at risk: (Avg Cost - Stop Price) × Open Shares. % is based on Account Equity." style={{ flex: 1, minWidth: '110px', padding: '8px', backgroundColor: '#fff3e0', borderRadius: '6px', border: '1px solid #ffe0b2', cursor: 'help' }}>
@@ -1690,6 +1716,7 @@ export default function App() {
             {/* TAB NAVIGATION */}
             <div style={{ display: 'flex', borderBottom: '1px solid #ddd', marginTop: '10px', marginBottom: '10px', flexShrink: 0 }}>
               <button onClick={() => setActiveTab('chart')} style={{ padding: '8px 16px', border: 'none', borderBottom: activeTab === 'chart' ? '3px solid #1565c0' : '3px solid transparent', backgroundColor: 'transparent', cursor: 'pointer', fontWeight: activeTab === 'chart' ? 'bold' : 'normal', color: activeTab === 'chart' ? '#1565c0' : '#555', fontSize: '14px' }}>Chart View</button>
+              <button onClick={() => setActiveTab('equityCurve')} style={{ padding: '8px 16px', border: 'none', borderBottom: activeTab === 'equityCurve' ? '3px solid #1565c0' : '3px solid transparent', backgroundColor: 'transparent', cursor: 'pointer', fontWeight: activeTab === 'equityCurve' ? 'bold' : 'normal', color: activeTab === 'equityCurve' ? '#1565c0' : '#555', fontSize: '14px' }}>Equity Curve</button>
               <button onClick={() => setActiveTab('table')} style={{ padding: '8px 16px', border: 'none', borderBottom: activeTab === 'table' ? '3px solid #1565c0' : '3px solid transparent', backgroundColor: 'transparent', cursor: 'pointer', fontWeight: activeTab === 'table' ? 'bold' : 'normal', color: activeTab === 'table' ? '#1565c0' : '#555', fontSize: '14px' }}>Table View</button>
               <button onClick={() => setActiveTab('monthly')} style={{ padding: '8px 16px', border: 'none', borderBottom: activeTab === 'monthly' ? '3px solid #1565c0' : '3px solid transparent', backgroundColor: 'transparent', cursor: 'pointer', fontWeight: activeTab === 'monthly' ? 'bold' : 'normal', color: activeTab === 'monthly' ? '#1565c0' : '#555', fontSize: '14px' }}>Monthly View</button>
             </div>
@@ -1701,6 +1728,16 @@ export default function App() {
               </div>
               <div style={{ flex: 1, position: 'relative' }}>
                 <div ref={chartContainerRef} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, border: '1px solid #ddd', borderRadius: '4px' }} />
+              </div>
+            </div>
+
+            {/* TAB: EQUITY CURVE */}
+            <div style={{ display: activeTab === 'equityCurve' ? 'flex' : 'none', flexDirection: 'column', flex: 1, overflow: 'hidden', paddingBottom: '15px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexShrink: 0 }}>
+                <h3 style={{ margin: 0, fontSize: '16px' }}>Portfolio Equity Curve Over Time</h3>
+              </div>
+              <div style={{ flex: 1, position: 'relative' }}>
+                <div ref={equityChartContainerRef} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, border: '1px solid #ddd', borderRadius: '4px' }} />
               </div>
             </div>
 
@@ -1731,6 +1768,7 @@ export default function App() {
                     {renderSortableTH('Pos %', 'PosPct', 'right', 'Percentage of Account Equity allocated to this position.')}
                     {renderSortableTH('Realized P/L', 'RealizedPL', 'right')}
                     {renderSortableTH('Open P/L', 'OpenPL', 'right')}
+                    {renderSortableTH('Open P/L %', 'OpenPLPct', 'right')}
                     {renderSortableTH('Break-Even', 'BreakEven', 'right')}
                     {renderSortableTH('R Multiple', 'RMultiple', 'right')}
                     {renderSortableTH('W/L % / PF', 'WinLossPF', 'center')}
@@ -1774,6 +1812,7 @@ export default function App() {
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333' }}>{tablePosSizePctStr}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{stat.realizedPL >= 0 ? '+' : ''}{stat.realizedPL === 0 ? '--' : '$' + stat.realizedPL.toFixed(2)}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.openPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{isClosed ? '--' : (stat.openPL >= 0 ? '+' : '') + '$' + stat.openPL.toFixed(2)}</td>
+                          <td style={{ padding: '12px 10px', textAlign: 'right', color: row.openPLPct >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{isClosed ? '--' : (row.openPLPct >= 0 ? '+' : '') + row.openPLPct.toFixed(2) + '%'}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333', fontWeight: 'bold' }}>{isClosed ? '--' : '$' + row.breakEvenPrice.toFixed(2) + breakEvenPctStr}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: row.rMultipleNum > 0 ? '#2e7d32' : (row.rMultipleNum < 0 ? '#d32f2f' : '#333'), fontWeight: 'bold', whiteSpace: 'nowrap' }}>{isClosed ? '--' : (row.rMultipleNum !== null ? <>{baseRiskPctStr} {row.rMultipleNum.toFixed(2)}R</> : '--')}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'center', color: '#555' }}>{displayWinRate}/{displayLossRate} / {displayPF}</td>

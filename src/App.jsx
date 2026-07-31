@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Papa from 'papaparse';
-import { createChart, CandlestickSeries, AreaSeries, createSeriesMarkers } from 'lightweight-charts';
+import { createChart, CandlestickSeries, createSeriesMarkers } from 'lightweight-charts';
 import { createClient } from '@supabase/supabase-js';
 
 // Initialize Supabase connection
@@ -102,11 +102,6 @@ export default function App() {
   const chartRef = useRef(null);
   const seriesRef = useRef(null);
   const markersRef = useRef(null); 
-
-  // --- Equity Curve Chart Ref ---
-  const equityChartContainerRef = useRef();
-  const equityChartRef = useRef(null);
-  const equitySeriesRef = useRef(null);
 
   // --- Modal States ---
   const [isCalcModalOpen, setIsCalcModalOpen] = useState(false);
@@ -605,7 +600,7 @@ export default function App() {
       cd.firstDayAvgCost = cd.firstDayBuyQty > 0 ? cd.firstDayBuyCost / cd.firstDayBuyQty : 0;
     });
 
-    // --- PASS 2: Main Processing Pipeline using Stored Averages ---
+    // --- PASS 2: Main Processing Pipeline ---
     const stats = {}; 
     const mStats = {}; 
     const positionCounters = {}; 
@@ -644,10 +639,14 @@ export default function App() {
         const pl = trade.quantity * (trade.price - fixedAvgCost);
         const plPct = fixedAvgCost > 0 ? (trade.price - fixedAvgCost) / fixedAvgCost : 0;
         
-        s.realizedPL += pl; 
+        // Respect equityDate cutoff for P&L tracking if configured
+        const isAfterEquityDate = !equityDate || trade.formattedDate >= equityDate;
+        if (isAfterEquityDate) {
+          s.realizedPL += pl;
+        }
+
         s.totalClosedCost += closedCost; 
         s.qty -= trade.quantity; 
-        
         s.tradesClosed++;
         
         if (pl > 0) s.grossProfit += pl; 
@@ -656,11 +655,17 @@ export default function App() {
         if (plPct > 0.005) s.winningTrades++; 
         else if (plPct < -0.005) s.losingTrades++;
 
-        realizedEvents.push({ date: tradeDate, pl: pl, plPct: plPct }); 
+        if (isAfterEquityDate) {
+          realizedEvents.push({ date: tradeDate, pl: pl, plPct: plPct }); 
+        }
 
         const yyyy = tradeDate.getFullYear(); const mm = String(tradeDate.getMonth() + 1).padStart(2, '0'); const monthKey = `${yyyy}-${mm}`; 
         if (!mStats[monthKey]) mStats[monthKey] = { monthKey, realizedPL: 0, grossProfit: 0, grossLoss: 0, tradesClosed: 0, winningTrades: 0, losingTrades: 0, eomEquity: 0 };
-        mStats[monthKey].realizedPL += pl; mStats[monthKey].tradesClosed++;
+        
+        if (isAfterEquityDate) {
+          mStats[monthKey].realizedPL += pl; 
+        }
+        mStats[monthKey].tradesClosed++;
         
         if (pl > 0) mStats[monthKey].grossProfit += pl; 
         if (pl < 0) mStats[monthKey].grossLoss += Math.abs(pl); 
@@ -737,7 +742,7 @@ export default function App() {
       } catch (error) {}
     };
     fetchCurrentPrices();
-  }, [trades, accountEquity]);
+  }, [trades, accountEquity, equityDate]);
 
   // Handle Chart Initialization & Resize Logic
   useEffect(() => {
@@ -765,80 +770,6 @@ export default function App() {
       };
     }
   }, [isAuthenticated, activeTab]);
-
-  // Handle Equity Curve Chart Initialization & Data Plotting
-  useEffect(() => {
-    if (isAuthenticated && equityChartContainerRef.current && activeTab === 'equity-curve') {
-      const chart = createChart(equityChartContainerRef.current, {
-        width: equityChartContainerRef.current.clientWidth, 
-        height: equityChartContainerRef.current.clientHeight,
-        layout: { background: { color: '#ffffff' }, textColor: '#333', fontSize: 10 },
-        grid: { vertLines: { color: '#eee' }, horzLines: { color: '#eee' } },
-        rightPriceScale: { borderColor: '#ddd' },
-        timeScale: { borderColor: '#ddd' },
-      });
-      
-      const areaSeries = chart.addSeries(AreaSeries, { 
-        lineColor: '#1565c0', 
-        topColor: 'rgba(21, 101, 192, 0.4)', 
-        bottomColor: 'rgba(21, 101, 192, 0.0)',
-        lineWidth: 2 
-      });
-      
-      equityChartRef.current = chart; 
-      equitySeriesRef.current = areaSeries;
-
-      // Compute cumulative equity timeline accurately from closed trades
-      const baseEquity = parseFloat(accountEquity) || 10000;
-      let runningPL = 0;
-      const dailyMap = {};
-
-      analyzedTrades.forEach(t => {
-        if (t['buy/sell'] === 'sell') {
-          const statObj = Object.values(tickerStats).find(s => s.ticker === t.ticker);
-          const avgCost = statObj ? statObj.avgCost : t.price; 
-          const pl = t.quantity * (t.price - avgCost);
-          dailyMap[t.formattedDate] = (dailyMap[t.formattedDate] || 0) + pl;
-        }
-      });
-
-      const sortedDates = Object.keys(dailyMap).sort((a, b) => new Date(a) - new Date(b));
-      const equityData = [];
-
-      if (equityDate) {
-        equityData.push({ time: equityDate, value: baseEquity });
-      }
-
-      sortedDates.forEach(dateStr => {
-        if (!equityDate || dateStr >= equityDate) {
-          runningPL += dailyMap[dateStr];
-          equityData.push({ time: dateStr, value: baseEquity + runningPL });
-        }
-      });
-
-      if (equityData.length === 0) {
-        const todayStr = new Date().toISOString().split('T')[0];
-        equityData.push({ time: equityDate || todayStr, value: baseEquity });
-      }
-
-      areaSeries.setData(equityData);
-      chart.timeScale().fitContent();
-
-      const resizeObserver = new ResizeObserver(entries => {
-        if (entries.length === 0 || entries[0].target !== equityChartContainerRef.current) return;
-        const newRect = entries[0].contentRect;
-        chart.applyOptions({ width: newRect.width, height: newRect.height });
-      });
-      resizeObserver.observe(equityChartContainerRef.current);
-
-      return () => { 
-        resizeObserver.disconnect(); 
-        chart.remove(); 
-        equityChartRef.current = null;
-        equitySeriesRef.current = null;
-      };
-    }
-  }, [isAuthenticated, activeTab, analyzedTrades, accountEquity, equityDate, tickerStats]);
 
   useEffect(() => {
     if (!selectedTicker || activeTab !== 'chart') return;
@@ -948,7 +879,6 @@ export default function App() {
   }, 0);
 
   const globalRiskPct = currentPortfolioValue > 0 && totalOpenRisk > 0 ? ((totalOpenRisk / currentPortfolioValue) * 100).toFixed(2) : '--';
-  const globalHeatPct = currentPortfolioValue > 0 && totalOpenHeat > 0 ? ((totalOpenHeat / currentPortfolioValue) * 100).toFixed(2) : '--';
 
   const uniqueTickers = [...new Set(trades.map(t => t.ticker))].sort();
 
@@ -1015,16 +945,12 @@ export default function App() {
 
       const openRisk = !isClosed && !isNaN(stopPrice) ? (stat.avgCost - stopPrice) * stat.qty : null;
       const openHeat = !isClosed && !isNaN(stopPrice) && stat.currentPrice > 0 ? (stat.currentPrice - stopPrice) * stat.qty : null;
-      const tableOpenHeatPctNum = openHeat !== null && currentPortfolioValue > 0 ? (openHeat / currentPortfolioValue) * 100 : null;
       
       const currentPosValue = stat.qty * (stat.currentPrice || stat.avgCost);
       const tablePosSizePctNum = !isClosed && currentPortfolioValue > 0 ? (currentPosValue / currentPortfolioValue) * 100 : 0;
       
       const breakEvenPrice = !isClosed ? (stat.avgCost - (stat.realizedPL / stat.qty)) : null;
       const breakEvenPct = !isClosed && stat.currentPrice > 0 ? ((breakEvenPrice / stat.currentPrice) - 1) * 100 : null;
-
-      const openPLPctNum = !isClosed && stat.avgCost > 0 && stat.currentPrice > 0 ? ((stat.currentPrice - stat.avgCost) / stat.avgCost) * 100 : null;
-      const realizedPLPctNum = stat.totalClosedCost > 0 ? (stat.realizedPL / stat.totalClosedCost) * 100 : null;
 
       let rMultipleNum = null;
       if (!isClosed && stat.firstDayAvgCost > 0 && stat.currentPrice > 0 && !isNaN(initialStop) && stat.firstDayAvgCost > initialStop) {
@@ -1045,12 +971,9 @@ export default function App() {
         initialStop,
         openRisk,
         openHeat,
-        tableOpenHeatPctNum,
         tablePosSizePctNum,
         breakEvenPrice,
         breakEvenPct,
-        openPLPctNum,
-        realizedPLPctNum,
         rMultipleNum,
         sortValues: {
           Position: displayName,
@@ -1171,7 +1094,7 @@ export default function App() {
           <div style={{ borderLeft: '2px solid #ddd', height: '24px' }}></div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div title={`Starting Equity for ${selectedPortfolio}.`} style={{ display: 'flex', alignItems: 'center', backgroundColor: '#e3f2fd', padding: '4px 8px', borderRadius: '4px', border: '1px solid #90caf9' }}>
+            <div title={`Starting Equity and As-of Date for ${selectedPortfolio}.`} style={{ display: 'flex', alignItems: 'center', backgroundColor: '#e3f2fd', padding: '4px 8px', borderRadius: '4px', border: '1px solid #90caf9' }}>
               <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#1565c0', marginRight: '6px', textTransform: 'uppercase' }}>Start Equity:</label>
               <span style={{color: '#1565c0', fontSize:'12px', fontWeight:'bold', marginRight:'2px'}}>$</span>
               <input type="number" value={accountEquity} onChange={(e) => setAccountEquity(e.target.value)} style={{ padding: '4px', borderRadius: '4px', border: '1px solid #ccc', width: '80px', outline: 'none', fontSize: '12px' }} placeholder="100000" />
@@ -1525,10 +1448,6 @@ export default function App() {
                 const indPosSizePct = currentPortfolioValue > 0 ? ((currentPosValue / currentPortfolioValue) * 100).toFixed(2) + '%' : '--';
 
                 const openHeat = !isNaN(stopPrice) && stat.currentPrice > 0 ? (stat.currentPrice - stopPrice) * stat.qty : null;
-                const openHeatPct = openHeat !== null && currentPortfolioValue > 0 ? ((openHeat / currentPortfolioValue) * 100).toFixed(2) : null;
-
-                const openPLPct = stat.avgCost > 0 && stat.currentPrice > 0 ? ((stat.currentPrice - stat.avgCost) / stat.avgCost) * 100 : null;
-                const realizedPLPct = stat.totalClosedCost > 0 ? (stat.realizedPL / stat.totalClosedCost) * 100 : null;
 
                 return (
                   <div key={stat.id} onClick={() => { setSelectedTicker(stat.ticker); setActiveTab('chart'); setPortfolioFilter(stat.ticker); setHistoryFilter(stat.id); }} style={{ padding: '12px', backgroundColor: '#fff', border: '1px solid #e0e0e0', borderRadius: '6px', marginBottom: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', cursor: 'pointer' }}>
@@ -1538,18 +1457,12 @@ export default function App() {
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginBottom: '4px' }}>
                       <span style={{ color: '#555' }}>Realized P/L:</span>
-                      <span style={{ color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: '600' }}>
-                        {stat.realizedPL >= 0 ? '+' : ''}${stat.realizedPL.toFixed(2)}
-                        {realizedPLPct !== null && stat.realizedPL !== 0 ? ` (${stat.realizedPL >= 0 ? '+' : ''}${realizedPLPct.toFixed(2)}%)` : ''}
-                      </span>
+                      <span style={{ color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: '600' }}>{stat.realizedPL >= 0 ? '+' : ''}${stat.realizedPL.toFixed(2)}</span>
                     </div>
                     {stat.qty > 0 && (
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginBottom: '8px' }}>
                         <span style={{ color: '#555' }}>Open P/L:</span>
-                        <span style={{ color: stat.openPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: '600' }}>
-                          {stat.openPL >= 0 ? '+' : ''}${stat.openPL.toFixed(2)}
-                          {openPLPct !== null ? ` (${stat.openPL >= 0 ? '+' : ''}${openPLPct.toFixed(2)}%)` : ''}
-                        </span>
+                        <span style={{ color: stat.openPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: '600' }}>{stat.openPL >= 0 ? '+' : ''}${stat.openPL.toFixed(2)}</span>
                       </div>
                     )}
                     {stat.qty > 0 && (
@@ -1596,7 +1509,7 @@ export default function App() {
                         {openHeat !== null && (
                           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginTop: '4px' }}>
                             <span style={{ color: '#555' }}>Open Heat:</span>
-                            <span style={{ color: '#333', fontWeight: 'bold' }}>${openHeat.toFixed(2)} ({openHeatPct}%)</span>
+                            <span style={{ color: '#333', fontWeight: 'bold' }}>${openHeat.toFixed(2)}</span>
                           </div>
                         )}
                       </div>
@@ -1719,11 +1632,9 @@ export default function App() {
                     ${totalInvested.toFixed(0)} <span style={{fontSize: '10px', fontWeight: 'normal'}}>({totalPosPct}%)</span>
                   </div>
                 </div>
-                <div title="Amount of open equity at risk: (Current Price - Stop Price) × Open Shares. % is based on Account Equity." style={{ flex: 1, minWidth: '110px', padding: '8px', backgroundColor: '#e3f2fd', borderRadius: '6px', border: '1px solid #bbdefb', cursor: 'help' }}>
+                <div title="Amount of open equity at risk: (Current Price - Stop Price) × Open Shares." style={{ flex: 1, minWidth: '110px', padding: '8px', backgroundColor: '#e3f2fd', borderRadius: '6px', border: '1px solid #bbdefb', cursor: 'help' }}>
                   <div style={{ fontSize: '10px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Total Open Heat</div>
-                  <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#1565c0' }}>
-                    ${totalOpenHeat.toFixed(2)} <span style={{fontSize: '10px', fontWeight: 'normal'}}>({globalHeatPct}%)</span>
-                  </div>
+                  <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#1565c0' }}>${totalOpenHeat.toFixed(2)}</div>
                 </div>
                 <div title="Amount of initial capital at risk: (Avg Cost - Stop Price) × Open Shares. % is based on Account Equity." style={{ flex: 1, minWidth: '110px', padding: '8px', backgroundColor: '#fff3e0', borderRadius: '6px', border: '1px solid #ffe0b2', cursor: 'help' }}>
                   <div style={{ fontSize: '10px', color: '#e65100', textTransform: 'uppercase', fontWeight: 'bold' }}>Total Open Risk</div>
@@ -1732,6 +1643,7 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* Row 2: Advanced Stats */}
                 <div style={{ flexBasis: '100%', height: '0' }}></div> 
                 
                 <div title="The largest peak-to-trough drop in your cumulative realized P/L." style={{ flex: 1, minWidth: '110px', padding: '8px', backgroundColor: '#ffebee', borderRadius: '6px', border: '1px solid #ffcdd2', cursor: 'help' }}>
@@ -1770,14 +1682,13 @@ export default function App() {
           </div>
 
           {/* ----------------------------------------------- */}
-          {/* AREA 2: MIDDLE 60% - Main Content (Chart/Table/Equity Curve) */}
+          {/* AREA 2: MIDDLE 60% - Main Content (Chart/Table) */}
           {/* ----------------------------------------------- */}
           <div style={{ height: '60%', flexShrink: 0, display: 'flex', flexDirection: 'column', padding: '0 20px', boxSizing: 'border-box', overflow: 'hidden' }}>
             
             {/* TAB NAVIGATION */}
             <div style={{ display: 'flex', borderBottom: '1px solid #ddd', marginTop: '10px', marginBottom: '10px', flexShrink: 0 }}>
               <button onClick={() => setActiveTab('chart')} style={{ padding: '8px 16px', border: 'none', borderBottom: activeTab === 'chart' ? '3px solid #1565c0' : '3px solid transparent', backgroundColor: 'transparent', cursor: 'pointer', fontWeight: activeTab === 'chart' ? 'bold' : 'normal', color: activeTab === 'chart' ? '#1565c0' : '#555', fontSize: '14px' }}>Chart View</button>
-              <button onClick={() => setActiveTab('equity-curve')} style={{ padding: '8px 16px', border: 'none', borderBottom: activeTab === 'equity-curve' ? '3px solid #1565c0' : '3px solid transparent', backgroundColor: 'transparent', cursor: 'pointer', fontWeight: activeTab === 'equity-curve' ? 'bold' : 'normal', color: activeTab === 'equity-curve' ? '#1565c0' : '#555', fontSize: '14px' }}>Equity Curve</button>
               <button onClick={() => setActiveTab('table')} style={{ padding: '8px 16px', border: 'none', borderBottom: activeTab === 'table' ? '3px solid #1565c0' : '3px solid transparent', backgroundColor: 'transparent', cursor: 'pointer', fontWeight: activeTab === 'table' ? 'bold' : 'normal', color: activeTab === 'table' ? '#1565c0' : '#555', fontSize: '14px' }}>Table View</button>
               <button onClick={() => setActiveTab('monthly')} style={{ padding: '8px 16px', border: 'none', borderBottom: activeTab === 'monthly' ? '3px solid #1565c0' : '3px solid transparent', backgroundColor: 'transparent', cursor: 'pointer', fontWeight: activeTab === 'monthly' ? 'bold' : 'normal', color: activeTab === 'monthly' ? '#1565c0' : '#555', fontSize: '14px' }}>Monthly View</button>
             </div>
@@ -1789,16 +1700,6 @@ export default function App() {
               </div>
               <div style={{ flex: 1, position: 'relative' }}>
                 <div ref={chartContainerRef} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, border: '1px solid #ddd', borderRadius: '4px' }} />
-              </div>
-            </div>
-
-            {/* TAB: EQUITY CURVE */}
-            <div style={{ display: activeTab === 'equity-curve' ? 'flex' : 'none', flexDirection: 'column', flex: 1, overflow: 'hidden', paddingBottom: '15px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexShrink: 0 }}>
-                <h3 style={{ margin: 0, fontSize: '16px' }}>Portfolio Equity Curve ({selectedPortfolio})</h3>
-              </div>
-              <div style={{ flex: 1, position: 'relative' }}>
-                <div ref={equityChartContainerRef} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, border: '1px solid #ddd', borderRadius: '4px' }} />
               </div>
             </div>
 
@@ -1870,14 +1771,8 @@ export default function App() {
                           <td style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 'bold' }}>{stat.qty}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333', fontWeight: 'bold' }}>{isClosed ? '--' : '$' + stat.avgCost.toFixed(2)}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333' }}>{tablePosSizePctStr}</td>
-                          <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>
-                            {stat.realizedPL >= 0 ? '+' : ''}{stat.realizedPL === 0 ? '--' : '$' + stat.realizedPL.toFixed(2)}
-                            {row.realizedPLPctNum !== null && stat.realizedPL !== 0 ? <span style={{fontWeight: 'normal', color: '#555'}}><br/>({stat.realizedPL >= 0 ? '+' : ''}{row.realizedPLPctNum.toFixed(2)}%)</span> : ''}
-                          </td>
-                          <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.openPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>
-                            {isClosed ? '--' : (stat.openPL >= 0 ? '+' : '') + '$' + stat.openPL.toFixed(2)}
-                            {row.openPLPctNum !== null && !isClosed ? <span style={{fontWeight: 'normal', color: '#555'}}><br/>({stat.openPL >= 0 ? '+' : ''}{row.openPLPctNum.toFixed(2)}%)</span> : ''}
-                          </td>
+                          <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{stat.realizedPL >= 0 ? '+' : ''}{stat.realizedPL === 0 ? '--' : '$' + stat.realizedPL.toFixed(2)}</td>
+                          <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.openPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{isClosed ? '--' : (stat.openPL >= 0 ? '+' : '') + '$' + stat.openPL.toFixed(2)}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333', fontWeight: 'bold' }}>{isClosed ? '--' : '$' + row.breakEvenPrice.toFixed(2) + breakEvenPctStr}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: row.rMultipleNum > 0 ? '#2e7d32' : (row.rMultipleNum < 0 ? '#d32f2f' : '#333'), fontWeight: 'bold', whiteSpace: 'nowrap' }}>{isClosed ? '--' : (row.rMultipleNum !== null ? <>{baseRiskPctStr} {row.rMultipleNum.toFixed(2)}R</> : '--')}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'center', color: '#555' }}>{displayWinRate}/{displayLossRate} / {displayPF}</td>
@@ -1893,7 +1788,7 @@ export default function App() {
                             )}
                           </td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: row.openRisk === null ? '#aaa' : (row.openRisk > 0 ? '#d32f2f' : '#2e7d32'), fontWeight: 'bold' }}>{isClosed ? '--' : (row.openRisk !== null ? `$${row.openRisk.toFixed(2)}` : 'Set Stop')}</td>
-                          <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{isClosed ? '--' : (row.openHeat !== null ? `$${row.openHeat.toFixed(2)} (${row.tableOpenHeatPctNum.toFixed(2)}%)` : 'Set Stop')}</td>
+                          <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333', fontWeight: 'bold' }}>{isClosed ? '--' : (row.openHeat !== null ? `$${row.openHeat.toFixed(2)}` : 'Set Stop')}</td>
                         </tr>
                       );
                   })}

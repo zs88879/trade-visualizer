@@ -547,6 +547,32 @@ export default function App() {
     setOutlookIsFetching(false);
   };
 
+  // Helper to re-calculate Equity Curve with full consistency between Realized + Open P/L
+  const calculateEquityCurve = (realizedEventsList, statsObj, baseEquity) => {
+    realizedEventsList.sort((a, b) => a.dateObj - b.dateObj);
+    let cumulativeCurvePL = baseEquity > 0 ? baseEquity : 0;
+    const curveMap = {};
+
+    realizedEventsList.forEach(e => {
+      cumulativeCurvePL += e.pl;
+      curveMap[e.date] = cumulativeCurvePL;
+    });
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const totalRealized = Object.values(statsObj).reduce((sum, st) => sum + st.realizedPL, 0);
+    const totalOpen = Object.values(statsObj).reduce((sum, st) => sum + (st.qty > 0 && st.openPL ? st.openPL : 0), 0);
+    const livePortfolioVal = baseEquity > 0 ? (baseEquity + totalRealized + totalOpen) : (totalRealized + totalOpen);
+
+    if (livePortfolioVal !== 0 || Object.keys(curveMap).length > 0) {
+      curveMap[todayStr] = livePortfolioVal;
+    }
+
+    return Object.keys(curveMap).sort().map(dateStr => ({
+      time: dateStr,
+      value: curveMap[dateStr]
+    }));
+  };
+
   useEffect(() => {
     if (trades.length === 0) {
       setTickerStats({}); setMonthlyStats({}); setAnalyzedTrades([]); setEquityCurveData([]);
@@ -693,28 +719,9 @@ export default function App() {
         mStats[key].eomEquity = parsedBaseEquity > 0 ? parsedBaseEquity + runningPL : 0;
     });
 
-    // Build Daily Equity Curve Timeline including Today's Live Portfolio Value
-    realizedEvents.sort((a, b) => a.dateObj - b.dateObj);
-    let cumulativeCurvePL = parsedBaseEquity > 0 ? parsedBaseEquity : 0;
-    const curveMap = {};
-    realizedEvents.forEach(e => {
-      cumulativeCurvePL += e.pl;
-      curveMap[e.date] = cumulativeCurvePL;
-    });
-
-    // Add current live point for today so curve matches current portfolio value
-    const todayStr = new Date().toISOString().split('T')[0];
-    const totalOpenPLCalc = Object.values(stats).reduce((sum, st) => sum + (st.qty > 0 && st.openPL ? st.openPL : 0), 0);
-    const livePortfolioValue = parsedBaseEquity > 0 ? (parsedBaseEquity + totalRealizedPL + totalOpenPLCalc) : 0;
-    if (livePortfolioValue > 0) {
-      curveMap[todayStr] = livePortfolioValue;
-    }
-    
-    const formattedEquityCurve = Object.keys(curveMap).sort().map(dateStr => ({
-      time: dateStr,
-      value: curveMap[dateStr]
-    }));
-    setEquityCurveData(formattedEquityCurve);
+    // Initial Equity Curve generation
+    const initialEquityCurve = calculateEquityCurve(realizedEvents, stats, parsedBaseEquity);
+    setEquityCurveData(initialEquityCurve);
 
     setMonthlyStats(mStats); setAnalyzedTrades(enrichedTradesList);
 
@@ -735,6 +742,7 @@ export default function App() {
     setAdvancedStats({ maxDD, maxWinStreak, maxLossStreak, avgWinDays, avgLossDays });
     setTickerStats({ ...stats }); 
 
+    // Fetch live market prices and dynamically re-calculate equity curve when open P/L updates
     const fetchCurrentPrices = async () => {
       try {
         const openPositions = Object.values(stats).filter(stat => stat.qty > 0);
@@ -754,7 +762,14 @@ export default function App() {
               }
             }
           } catch (error) {}
-          setTickerStats({...stats}); await new Promise(r => setTimeout(r, 200));
+          
+          setTickerStats({ ...stats }); 
+          
+          // Re-sync equity curve with current live open P/L values
+          const updatedCurve = calculateEquityCurve(realizedEvents, stats, parsedBaseEquity);
+          setEquityCurveData(updatedCurve);
+
+          await new Promise(r => setTimeout(r, 200));
         }
       } catch (error) {}
     };
@@ -788,31 +803,31 @@ export default function App() {
     }
   }, [isAuthenticated, activeTab]);
 
-  // Handle Equity Curve Chart Init
+  // Handle Equity Curve Chart Init & Live Data Updates
   useEffect(() => {
     if (isAuthenticated && equityChartContainerRef.current && activeTab === 'equityCurve' && equityCurveData.length > 0) {
-      const chart = createChart(equityChartContainerRef.current, {
-        width: equityChartContainerRef.current.clientWidth,
-        height: equityChartContainerRef.current.clientHeight,
-        layout: { background: { color: '#ffffff' }, textColor: '#333', fontSize: 10 },
-        grid: { vertLines: { color: '#eee' }, horzLines: { color: '#eee' } },
-      });
-      const lineSeries = chart.addSeries(LineSeries, { color: '#1565c0', lineWidth: 2 });
-      lineSeries.setData(equityCurveData);
-      chart.timeScale().fitContent();
-      equityChartRef.current = chart; equitySeriesRef.current = lineSeries;
+      if (!equityChartRef.current) {
+        const chart = createChart(equityChartContainerRef.current, {
+          width: equityChartContainerRef.current.clientWidth,
+          height: equityChartContainerRef.current.clientHeight,
+          layout: { background: { color: '#ffffff' }, textColor: '#333', fontSize: 10 },
+          grid: { vertLines: { color: '#eee' }, horzLines: { color: '#eee' } },
+        });
+        const lineSeries = chart.addSeries(LineSeries, { color: '#1565c0', lineWidth: 2 });
+        lineSeries.setData(equityCurveData);
+        chart.timeScale().fitContent();
+        equityChartRef.current = chart; equitySeriesRef.current = lineSeries;
 
-      const resizeObserver = new ResizeObserver(entries => {
-        if (entries.length === 0 || entries[0].target !== equityChartContainerRef.current) return;
-        const newRect = entries[0].contentRect;
-        chart.applyOptions({ width: newRect.width, height: newRect.height });
-      });
-      resizeObserver.observe(equityChartContainerRef.current);
-
-      return () => {
-        resizeObserver.disconnect();
-        chart.remove();
-      };
+        const resizeObserver = new ResizeObserver(entries => {
+          if (entries.length === 0 || entries[0].target !== equityChartContainerRef.current) return;
+          const newRect = entries[0].contentRect;
+          chart.applyOptions({ width: newRect.width, height: newRect.height });
+        });
+        resizeObserver.observe(equityChartContainerRef.current);
+      } else if (equitySeriesRef.current) {
+        equitySeriesRef.current.setData(equityCurveData);
+        equityChartRef.current.timeScale().fitContent();
+      }
     }
   }, [isAuthenticated, activeTab, equityCurveData]);
 

@@ -203,10 +203,21 @@ export default function App() {
     } catch (error) { console.error("Error fetching settings:", error.message); }
   };
 
-  const updateSettingInDB = async (settingType, newValuesArray) => {
+const updateSettingInDB = async (settingType, newValuesArray) => {
     try {
-      await supabase.from('user_settings').upsert({ setting_type: settingType, setting_values: newValuesArray }, { onConflict: 'setting_type' });
-    } catch (error) { console.error(`Error saving ${settingType}:`, error.message); }
+      const { error } = await supabase.from('user_settings').upsert(
+        { setting_type: settingType, setting_values: newValuesArray }, 
+        { onConflict: 'setting_type' }
+      );
+      
+      // Explicitly check for Supabase errors
+      if (error) {
+        console.error(`Supabase error saving ${settingType}:`, error);
+        alert(`Database Save Failed: ${error.message}`);
+      }
+    } catch (error) { 
+      console.error(`Network error saving ${settingType}:`, error.message); 
+    }
   };
 
   const fetchStopsFromDB = async () => {
@@ -261,6 +272,14 @@ export default function App() {
     } catch (error) { console.error("Error fetching from DB:", error.message); }
   };
 
+// 1. Fetch settings ONLY when you first log in
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchSettingsFromDB();
+    }
+  }, [isAuthenticated]);
+
+  // 2. Fetch trades and notes when portfolio changes
   useEffect(() => { 
     if (isAuthenticated) { 
       setTrades([]); 
@@ -274,7 +293,6 @@ export default function App() {
       fetchTradesFromDB(); 
       fetchStopsFromDB(); 
       fetchNotesFromDB(); 
-      fetchSettingsFromDB(); 
     } 
   }, [startDate, endDate, isAuthenticated, selectedPortfolio]);
 

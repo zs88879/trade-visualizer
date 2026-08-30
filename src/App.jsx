@@ -331,23 +331,38 @@ export default function App() {
     } catch (error) { console.error("Error syncing trade note:", error.message); }
   };
 
-  const handleAddPortfolio = () => {
+const handleAddPortfolio = async () => {
     const trimmed = newPortfolio.trim();
     if (trimmed && !portfolios.includes(trimmed)) {
       const updated = [...portfolios, trimmed];
+      
+      // 1. Update the UI optimistically
       setPortfolios(updated);
-      updateSettingInDB('portfolios', updated);
+      
+      // 2. WAIT for the database to finish saving
+      await updateSettingInDB('portfolios', updated);
+      
+      // 3. Now it is safe to switch portfolios and trigger a re-fetch
       setNewPortfolio('');
       setSelectedPortfolio(trimmed);
     }
   };
 
-  const handleRemovePortfolio = (item) => {
+  const handleRemovePortfolio = async (item) => {
     if (portfolios.length === 1) { alert("You must have at least one portfolio."); return; }
+    
     const updated = portfolios.filter(p => p !== item);
+    
+    // 1. Update the UI optimistically
     setPortfolios(updated);
-    updateSettingInDB('portfolios', updated);
-    if (selectedPortfolio === item) setSelectedPortfolio(updated[0]);
+    
+    // 2. WAIT for the database to finish saving
+    await updateSettingInDB('portfolios', updated);
+    
+    // 3. Now it is safe to switch portfolios
+    if (selectedPortfolio === item) {
+      setSelectedPortfolio(updated[0]);
+    }
   };
 
   const handleAddEntryMethod = () => {

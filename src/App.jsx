@@ -135,6 +135,14 @@ export default function App() {
   const [manualTradeCommission, setManualTradeCommission] = useState('0');
   const [isSubmittingTrade, setIsSubmittingTrade] = useState(false); // <--- ADD THIS  
 
+  const [manualAssetType, setManualAssetType] = useState('stock'); // 'stock' or 'option'
+  const [manualOptionType, setManualOptionType] = useState('call'); // 'call' or 'put'
+  const [manualStrike, setManualStrike] = useState('');
+  const [manualExpiration, setManualExpiration] = useState('');
+
+  // --- ADD IT HERE ---
+  const [manualOptionPrices, setManualOptionPrices] = useState({});
+
   // --- Calculator State ---
   const [calcMode, setCalcMode] = useState('position');
   const [calcTicker, setCalcTicker] = useState('');
@@ -403,36 +411,52 @@ export default function App() {
 
   const handleManualTradeSubmit = async (e) => {
     e.preventDefault();
-    if (isSubmittingTrade) return; // <--- Prevents double execution
+    if (isSubmittingTrade) return;
 
     if (!manualTradeDate || !manualTradeTicker || !manualTradePrice || !manualTradeQty) {
       alert("Please fill in all fields to record the trade.");
       return;
     }
 
-    setIsSubmittingTrade(true); // <--- Lock submission
+    if (manualAssetType === 'option' && (!manualStrike || !manualExpiration)) {
+      alert("Please provide the Strike Price and Expiration Date for the option contract.");
+      return;
+    }
+
+    setIsSubmittingTrade(true);
 
     const parsedPrice = parseFloat(manualTradePrice);
     const parsedQty = Math.abs(parseInt(manualTradeQty, 10));
     const parsedCommission = parseFloat(manualTradeCommission) || 0;
+    
+    // Apply 100x multiplier if it's an option contract
+    const multiplier = manualAssetType === 'option' ? 100 : 1;
 
     let effectivePrice = parsedPrice;
     if (parsedCommission > 0 && parsedQty > 0) {
+      const feePerUnit = parsedCommission / (parsedQty * multiplier);
       if (manualTradeAction === 'buy') {
-        effectivePrice = parsedPrice + (parsedCommission / parsedQty);
+        effectivePrice = parsedPrice + feePerUnit;
       } else {
-        effectivePrice = parsedPrice - (parsedCommission / parsedQty);
+        effectivePrice = parsedPrice - feePerUnit;
       }
+    }
+
+    // Format ticker name neatly for options (e.g. AAPL 150C 06/19/26)
+    let finalTicker = manualTradeTicker.toUpperCase().trim();
+    if (manualAssetType === 'option') {
+      const formattedDate = manualExpiration.split('-').reverse().join(''); // or keep standard yyyy-mm-dd
+      finalTicker = `${finalTicker} ${manualStrike}${manualOptionType.toUpperCase()[0]} (${manualExpiration})`;
     }
 
     const targetPortfolio = manualTradePortfolio || selectedPortfolio;
     const newTrade = {
       portfolio: targetPortfolio,
       trade_date: manualTradeDate,
-      ticker: manualTradeTicker.toUpperCase().trim(),
+      ticker: finalTicker,
       action: manualTradeAction,
       price: effectivePrice,
-      quantity: parsedQty
+      quantity: parsedQty * multiplier // Store total underlying equivalent shares/contracts cleanly
     };
 
     try {
@@ -444,6 +468,9 @@ export default function App() {
       setManualTradePrice('');
       setManualTradeQty('');
       setManualTradeCommission('0');
+      setManualStrike('');
+      setManualExpiration('');
+      setManualAssetType('stock');
       setManualTradeDate(new Date().toISOString().split('T')[0]); 
       setManualTradeAction('buy');
       
@@ -456,7 +483,7 @@ export default function App() {
       console.error("Error adding trade:", error.message); 
       alert("Failed to add trade. Please try again."); 
     } finally {
-      setIsSubmittingTrade(false); // <--- Unlock submission whether success or error
+      setIsSubmittingTrade(false);
     }
   };
 
@@ -1446,6 +1473,33 @@ export default function App() {
                 <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#555' }}>Ticker:</label>
                 <input type="text" value={manualTradeTicker} onChange={(e) => setManualTradeTicker(e.target.value.toUpperCase())} required placeholder="e.g. AAPL" style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', width: '180px', outline: 'none', boxSizing: 'border-box', textTransform: 'uppercase' }} />
               </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#555' }}>Asset Type:</label>
+                <select value={manualAssetType} onChange={(e) => setManualAssetType(e.target.value)} style={{ padding: '8px', borderRadius: '4px', border: '1px solid #ccc', width: '180px', outline: 'none' }}>
+                  <option value="stock">Stock / ETF</option>
+                  <option value="option">Option Contract</option>
+                </select>
+              </div>
+
+              {manualAssetType === 'option' && (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#555' }}>Option Type:</label>
+                    <select value={manualOptionType} onChange={(e) => setManualOptionType(e.target.value)} style={{ padding: '8px', borderRadius: '4px', border: '1px solid #ccc', width: '180px', outline: 'none' }}>
+                      <option value="call">CALL</option>
+                      <option value="put">PUT</option>
+                    </select>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#555' }}>Strike Price ($):</label>
+                    <input type="number" step="0.5" value={manualStrike} onChange={(e) => setManualStrike(e.target.value)} required placeholder="150.00" style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', width: '180px', outline: 'none', boxSizing: 'border-box' }} />
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#555' }}>Expiration Date:</label>
+                    <input type="date" value={manualExpiration} onChange={(e) => setManualExpiration(e.target.value)} required style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', width: '180px', outline: 'none', boxSizing: 'border-box' }} />
+                  </div>
+                </>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#555' }}>Action:</label>
                 <select value={manualTradeAction} onChange={(e) => setManualTradeAction(e.target.value)} style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', width: '180px', outline: 'none', boxSizing: 'border-box' }}>

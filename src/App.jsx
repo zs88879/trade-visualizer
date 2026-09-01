@@ -256,7 +256,12 @@ export default function App() {
       if (error) throw error;
 
       const formattedTrades = data.map(row => ({
-        formattedDate: row.trade_date, ticker: row.ticker, 'buy/sell': row.action, price: Number(row.price), quantity: Number(row.quantity)
+        id: row.id, // <--- INCLUDE SUPABASE ID HERE
+        formattedDate: row.trade_date, 
+        ticker: row.ticker, 
+        'buy/sell': row.action, 
+        price: Number(row.price), 
+        quantity: Number(row.quantity)
       })).sort((a, b) => {
         const dateA = new Date(a.formattedDate); const dateB = new Date(b.formattedDate);
         if (dateA.getTime() === dateB.getTime()) {
@@ -452,6 +457,20 @@ export default function App() {
       alert("Failed to add trade. Please try again."); 
     } finally {
       setIsSubmittingTrade(false); // <--- Unlock submission whether success or error
+    }
+  };
+
+  const handleDeleteTrade = async (tradeId, e) => {
+    e.stopPropagation(); // Prevents triggering the parent click event (which selects the ticker chart)
+    if (!window.confirm("Are you sure you want to delete this trade?")) return;
+
+    try {
+      const { error } = await supabase.from('trades').delete().eq('id', tradeId);
+      if (error) throw error;
+      fetchTradesFromDB();
+    } catch (error) {
+      console.error("Error deleting trade:", error.message);
+      alert("Failed to delete trade. Please try again.");
     }
   };
 
@@ -1750,7 +1769,7 @@ export default function App() {
                 const borderColor = CYCLE_COLORS[colorIdx].border;
                 
                 return (
-                  <li key={index} 
+                  <li key={trade.id || index} 
                       onClick={() => { setSelectedTicker(trade.ticker); setActiveTab('chart'); setPortfolioFilter(trade.ticker); setHistoryFilter(`${trade.ticker}-${trade.positionNum}`); }} 
                       style={{ 
                         padding: '12px', 
@@ -1764,7 +1783,17 @@ export default function App() {
                       }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
                       <span>{trade.ticker} <span style={{fontSize: '11px', color: '#888', fontWeight: 'normal'}}>#{trade.positionNum}</span></span>
-                      <span style={{ color: trade['buy/sell'] === 'buy' ? '#26a69a' : '#ef5350' }}>{trade['buy/sell'].toUpperCase()}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ color: trade['buy/sell'] === 'buy' ? '#26a69a' : '#ef5350' }}>{trade['buy/sell'].toUpperCase()}</span>
+                        {/* DELETE BUTTON */}
+                        <button 
+                          onClick={(e) => handleDeleteTrade(trade.id, e)} 
+                          title="Delete Trade"
+                          style={{ background: 'none', border: 'none', color: '#d32f2f', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold', padding: '0 2px' }}
+                        >
+                          &times;
+                        </button>
+                      </div>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#666', marginTop: '6px' }}>
                       <span>{trade.formattedDate}</span><span>{trade.quantity} @ ${trade.price.toFixed(2)}</span>

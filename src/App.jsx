@@ -497,6 +497,26 @@ export default function App() {
       ...prev,
       [statId]: value
     }));
+
+    // Dynamically update tickerStats so openPL updates everywhere (Sidebar, Table, Summary)
+    setTickerStats(prevStats => {
+      const updated = { ...prevStats };
+      if (updated[statId]) {
+        const numVal = parseFloat(value);
+        const effectivePrice = isNaN(numVal) ? 0 : numVal;
+        updated[statId].currentPrice = effectivePrice;
+        
+        const s = updated[statId];
+        if (s.qty !== 0) {
+          if (s.positionType === 'SHORT' || s.qty < 0) {
+            s.openPL = (s.avgCost - effectivePrice) * Math.abs(s.qty);
+          } else {
+            s.openPL = (effectivePrice - s.avgCost) * s.qty;
+          }
+        }
+      }
+      return updated;
+    });
   };
 
   const handleDeleteTrade = async (tradeId, e) => {

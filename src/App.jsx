@@ -203,21 +203,17 @@ export default function App() {
     } catch (error) { console.error("Error fetching settings:", error.message); }
   };
 
-const updateSettingInDB = async (settingType, newValuesArray) => {
+  const updateSettingInDB = async (settingType, newValuesArray) => {
     try {
       const { error } = await supabase.from('user_settings').upsert(
         { setting_type: settingType, setting_values: newValuesArray }, 
         { onConflict: 'setting_type' }
       );
-      
-      // Explicitly check for Supabase errors
       if (error) {
         console.error(`Supabase error saving ${settingType}:`, error);
         alert(`Database Save Failed: ${error.message}`);
       }
-    } catch (error) { 
-      console.error(`Network error saving ${settingType}:`, error.message); 
-    }
+    } catch (error) { console.error(`Network error saving ${settingType}:`, error.message); }
   };
 
   const fetchStopsFromDB = async () => {
@@ -272,14 +268,12 @@ const updateSettingInDB = async (settingType, newValuesArray) => {
     } catch (error) { console.error("Error fetching from DB:", error.message); }
   };
 
-// 1. Fetch settings ONLY when you first log in
   useEffect(() => {
     if (isAuthenticated) {
       fetchSettingsFromDB();
     }
   }, [isAuthenticated]);
 
-  // 2. Fetch trades and notes when portfolio changes
   useEffect(() => { 
     if (isAuthenticated) { 
       setTrades([]); 
@@ -349,18 +343,12 @@ const updateSettingInDB = async (settingType, newValuesArray) => {
     } catch (error) { console.error("Error syncing trade note:", error.message); }
   };
 
-const handleAddPortfolio = async () => {
+  const handleAddPortfolio = async () => {
     const trimmed = newPortfolio.trim();
     if (trimmed && !portfolios.includes(trimmed)) {
       const updated = [...portfolios, trimmed];
-      
-      // 1. Update the UI optimistically
       setPortfolios(updated);
-      
-      // 2. WAIT for the database to finish saving
       await updateSettingInDB('portfolios', updated);
-      
-      // 3. Now it is safe to switch portfolios and trigger a re-fetch
       setNewPortfolio('');
       setSelectedPortfolio(trimmed);
     }
@@ -368,19 +356,10 @@ const handleAddPortfolio = async () => {
 
   const handleRemovePortfolio = async (item) => {
     if (portfolios.length === 1) { alert("You must have at least one portfolio."); return; }
-    
     const updated = portfolios.filter(p => p !== item);
-    
-    // 1. Update the UI optimistically
     setPortfolios(updated);
-    
-    // 2. WAIT for the database to finish saving
     await updateSettingInDB('portfolios', updated);
-    
-    // 3. Now it is safe to switch portfolios
-    if (selectedPortfolio === item) {
-      setSelectedPortfolio(updated[0]);
-    }
+    if (selectedPortfolio === item) setSelectedPortfolio(updated[0]);
   };
 
   const handleAddEntryMethod = () => {
@@ -508,7 +487,10 @@ const handleAddPortfolio = async () => {
     if (Object.keys(tickerStats).length === 0) { alert("No data available to export."); return; }
     const exportData = Object.values(tickerStats).sort((a, b) => a.ticker.localeCompare(b.ticker) || a.positionNum - b.positionNum).map(stat => {
         const isClosed = stat.qty === 0;
-        const breakEvenPrice = !isClosed ? (stat.avgCost - (stat.realizedPL / stat.qty)) : null;
+        const isShort = stat.positionType === 'SHORT';
+        const breakEvenPrice = !isClosed 
+          ? (isShort ? (stat.avgCost + (stat.realizedPL / Math.abs(stat.qty))) : (stat.avgCost - (stat.realizedPL / stat.qty))) 
+          : null;
         const breakEvenPct = !isClosed && stat.currentPrice > 0 ? ((breakEvenPrice / stat.currentPrice) - 1) * 100 : null;
         const notesObj = tradeNotes[stat.id] || {};
         const stopData = stopPrices[stat.id] || {};
@@ -516,17 +498,19 @@ const handleAddPortfolio = async () => {
 
         let rMultiple = null;
         let baseRiskPctStr = '';
-        if (!isClosed && stat.firstDayAvgCost > 0 && stat.currentPrice > 0 && !isNaN(initialStop) && stat.firstDayAvgCost > initialStop) {
-            const riskUnit = stat.firstDayAvgCost - initialStop;
-            rMultiple = ((stat.currentPrice - stat.avgCost) / riskUnit).toFixed(2);
-            const baseRiskPct = (riskUnit / stat.firstDayAvgCost) * 100;
-            baseRiskPctStr = `<${baseRiskPct.toFixed(2)}%>`;
+        if (!isClosed && stat.firstDayAvgCost > 0 && stat.currentPrice > 0 && !isNaN(initialStop)) {
+            const riskUnit = isShort ? (initialStop - stat.firstDayAvgCost) : (stat.firstDayAvgCost - initialStop);
+            if (riskUnit > 0) {
+              rMultiple = isShort ? ((stat.avgCost - stat.currentPrice) / riskUnit).toFixed(2) : ((stat.currentPrice - stat.avgCost) / riskUnit).toFixed(2);
+              const baseRiskPct = (riskUnit / stat.firstDayAvgCost) * 100;
+              baseRiskPctStr = `<${baseRiskPct.toFixed(2)}%>`;
+            }
         }
 
         return {
           "Portfolio": selectedPortfolio,
-          "Ticker": stat.ticker, "Cycle #": stat.positionNum, "Status": isClosed ? "CLOSED" : "OPEN", "Remaining Qty": stat.qty,
-          "Avg Entry Price": stat.avgCost.toFixed(2), "Net Realized P/L ($)": stat.realizedPL.toFixed(2), "Open P/L ($)": stat.qty > 0 ? stat.openPL.toFixed(2) : "0.00",
+          "Ticker": stat.ticker, "Cycle #": stat.positionNum, "Side": stat.positionType, "Status": isClosed ? "CLOSED" : "OPEN", "Remaining Qty": stat.qty,
+          "Avg Entry Price": stat.avgCost.toFixed(2), "Net Realized P/L ($)": stat.realizedPL.toFixed(2), "Open P/L ($)": stat.qty !== 0 ? stat.openPL.toFixed(2) : "0.00",
           "Break-Even Price": breakEvenPrice !== null ? breakEvenPrice.toFixed(2) : "N/A",
           "Break-Even %": breakEvenPct !== null ? breakEvenPct.toFixed(2) + '%' : "N/A",
           "R Multiple": rMultiple !== null ? `${baseRiskPctStr} ${rMultiple}R` : "N/A",
@@ -593,7 +577,7 @@ const handleAddPortfolio = async () => {
 
     const todayStr = new Date().toISOString().split('T')[0];
     const totalRealized = Object.values(statsObj).reduce((sum, st) => sum + st.realizedPL, 0);
-    const totalOpen = Object.values(statsObj).reduce((sum, st) => sum + (st.qty > 0 && st.openPL ? st.openPL : 0), 0);
+    const totalOpen = Object.values(statsObj).reduce((sum, st) => sum + (st.qty !== 0 && st.openPL ? st.openPL : 0), 0);
     const livePortfolioVal = baseEquity > 0 ? (baseEquity + totalRealized + totalOpen) : (totalRealized + totalOpen);
 
     if (livePortfolioVal !== 0 || Object.keys(curveMap).length > 0) {
@@ -613,7 +597,7 @@ const handleAddPortfolio = async () => {
       return;
     }
 
-    // --- PASS 1: Calculate Global & First Day Average Cost per Cycle ---
+    // --- PASS 1: Calculate Global & First Day Average Cost per Cycle (Supports LONG & SHORT) ---
     const cycleData = {};
     const tempCounters = {};
 
@@ -623,36 +607,43 @@ const handleAddPortfolio = async () => {
       const posId = `${trade.ticker}-${posNum}`;
 
       if (!cycleData[posId]) {
+        const isShortCycle = trade['buy/sell'] === 'sell';
         cycleData[posId] = { 
-          totalBuyQty: 0, totalBuyCost: 0, globalAvgCost: 0, qtyTracker: 0,
-          firstBuyDate: null, firstDayBuyQty: 0, firstDayBuyCost: 0, firstDayAvgCost: 0
+          positionType: isShortCycle ? 'SHORT' : 'LONG',
+          totalEntryQty: 0, totalEntryCost: 0, globalAvgCost: 0, qtyTracker: 0,
+          firstEntryDate: null, firstDayEntryQty: 0, firstDayEntryCost: 0, firstDayAvgCost: 0
         };
       }
 
-      if (trade['buy/sell'] === 'buy') {
-        if (!cycleData[posId].firstBuyDate) {
-          cycleData[posId].firstBuyDate = trade.formattedDate;
+      const cd = cycleData[posId];
+      const isShort = cd.positionType === 'SHORT';
+      const isEntryAction = isShort ? (trade['buy/sell'] === 'sell') : (trade['buy/sell'] === 'buy');
+      const isExitAction = isShort ? (trade['buy/sell'] === 'buy') : (trade['buy/sell'] === 'sell');
+
+      if (isEntryAction) {
+        if (!cd.firstEntryDate) {
+          cd.firstEntryDate = trade.formattedDate;
         }
-        if (trade.formattedDate === cycleData[posId].firstBuyDate) {
-          cycleData[posId].firstDayBuyQty += trade.quantity;
-          cycleData[posId].firstDayBuyCost += (trade.price * trade.quantity);
+        if (trade.formattedDate === cd.firstEntryDate) {
+          cd.firstDayEntryQty += trade.quantity;
+          cd.firstDayEntryCost += (trade.price * trade.quantity);
         }
 
-        cycleData[posId].qtyTracker += trade.quantity;
-        cycleData[posId].totalBuyQty += trade.quantity;
-        cycleData[posId].totalBuyCost += (trade.price * trade.quantity);
-      } else if (trade['buy/sell'] === 'sell') {
-        cycleData[posId].qtyTracker -= trade.quantity;
-        if (cycleData[posId].qtyTracker <= 0.0001) { 
-          cycleData[posId].qtyTracker = 0;
+        cd.qtyTracker += (isShort ? -trade.quantity : trade.quantity);
+        cd.totalEntryQty += trade.quantity;
+        cd.totalEntryCost += (trade.price * trade.quantity);
+      } else if (isExitAction) {
+        cd.qtyTracker += (isShort ? trade.quantity : -trade.quantity);
+        if (Math.abs(cd.qtyTracker) <= 0.0001) { 
+          cd.qtyTracker = 0;
           tempCounters[trade.ticker]++;
         }
       }
     });
 
     Object.values(cycleData).forEach(cd => {
-      cd.globalAvgCost = cd.totalBuyQty > 0 ? cd.totalBuyCost / cd.totalBuyQty : 0;
-      cd.firstDayAvgCost = cd.firstDayBuyQty > 0 ? cd.firstDayBuyCost / cd.firstDayBuyQty : 0;
+      cd.globalAvgCost = cd.totalEntryQty > 0 ? cd.totalEntryCost / cd.totalEntryQty : 0;
+      cd.firstDayAvgCost = cd.firstDayEntryQty > 0 ? cd.firstDayEntryCost / cd.firstDayEntryQty : 0;
     });
 
     // --- PASS 2: Main Processing Pipeline ---
@@ -668,13 +659,17 @@ const handleAddPortfolio = async () => {
       const posId = `${trade.ticker}-${currentPosNum}`;
 
       enrichedTradesList.push({ ...trade, positionNum: currentPosNum });
+      const cd = cycleData[posId] || {};
+      const isShort = cd.positionType === 'SHORT';
 
       if (!stats[posId]) {
         stats[posId] = { 
-          id: posId, ticker: trade.ticker, positionNum: currentPosNum, qty: 0, 
+          id: posId, ticker: trade.ticker, positionNum: currentPosNum, 
+          positionType: isShort ? 'SHORT' : 'LONG',
+          qty: 0, 
           realizedPL: 0, 
-          avgCost: cycleData[posId].globalAvgCost, 
-          firstDayAvgCost: cycleData[posId].firstDayAvgCost,
+          avgCost: cd.globalAvgCost, 
+          firstDayAvgCost: cd.firstDayAvgCost,
           currentPrice: 0, openPL: 0,
           openLots: [], totalDaysHeld: 0, sharesClosed: 0, tradesClosed: 0, 
           winningTrades: 0, losingTrades: 0, grossProfit: 0, grossLoss: 0, totalClosedCost: 0,
@@ -685,14 +680,24 @@ const handleAddPortfolio = async () => {
       const s = stats[posId]; 
       const tradeDate = new Date(trade.formattedDate);
       
-      if (trade['buy/sell'] === 'buy') {
-        s.qty += trade.quantity; 
+      const isEntryAction = isShort ? (trade['buy/sell'] === 'sell') : (trade['buy/sell'] === 'buy');
+      const isExitAction = isShort ? (trade['buy/sell'] === 'buy') : (trade['buy/sell'] === 'sell');
+
+      if (isEntryAction) {
+        s.qty += (isShort ? -trade.quantity : trade.quantity); 
         s.openLots.push({ date: tradeDate, qty: trade.quantity });
-      } else if (trade['buy/sell'] === 'sell') {
+      } else if (isExitAction) {
         const fixedAvgCost = s.avgCost; 
         const closedCost = fixedAvgCost * trade.quantity; 
-        const pl = trade.quantity * (trade.price - fixedAvgCost);
-        const plPct = fixedAvgCost > 0 ? (trade.price - fixedAvgCost) / fixedAvgCost : 0;
+        
+        // P/L Calculation: Long vs Short
+        const pl = isShort 
+          ? trade.quantity * (fixedAvgCost - trade.price)
+          : trade.quantity * (trade.price - fixedAvgCost);
+          
+        const plPct = isShort
+          ? (fixedAvgCost > 0 ? (fixedAvgCost - trade.price) / fixedAvgCost : 0)
+          : (fixedAvgCost > 0 ? (trade.price - fixedAvgCost) / fixedAvgCost : 0);
         
         const isAfterEquityDate = !equityDate || trade.formattedDate >= equityDate;
         if (isAfterEquityDate) {
@@ -700,7 +705,7 @@ const handleAddPortfolio = async () => {
         }
 
         s.totalClosedCost += closedCost; 
-        s.qty -= trade.quantity; 
+        s.qty += (isShort ? trade.quantity : -trade.quantity); 
         s.tradesClosed++;
         
         if (pl > 0) s.grossProfit += pl; 
@@ -738,7 +743,7 @@ const handleAddPortfolio = async () => {
           lot.qty -= closeQty; qtyToClose -= closeQty; if (lot.qty === 0) s.openLots.shift();
         }
         
-        if (s.qty <= 0.0001) { 
+        if (Math.abs(s.qty) <= 0.0001) { 
           s.qty = 0; 
           positionCounters[trade.ticker]++;
         }
@@ -775,10 +780,10 @@ const handleAddPortfolio = async () => {
     setAdvancedStats({ maxDD, maxWinStreak, maxLossStreak, avgWinDays, avgLossDays });
     setTickerStats({ ...stats }); 
 
-    // Fetch live market prices and dynamically re-calculate equity curve when open P/L updates
+    // Fetch live market prices and dynamically re-calculate open P/L for Short and Long
     const fetchCurrentPrices = async () => {
       try {
-        const openPositions = Object.values(stats).filter(stat => stat.qty > 0);
+        const openPositions = Object.values(stats).filter(stat => stat.qty !== 0);
         if (openPositions.length === 0) return;
 
         const uniqueOpenTickers = [...new Set(openPositions.map(s => s.ticker))];
@@ -791,7 +796,16 @@ const handleAddPortfolio = async () => {
               const quote = data.chart.result[0].indicators.quote[0]; const closes = quote.close.filter(c => c !== null && c !== undefined);
               if (closes.length > 0) {
                 const latestClosePrice = closes[closes.length - 1];
-                openPositions.forEach(stat => { if (stat.ticker === ticker) { stat.currentPrice = latestClosePrice; stat.openPL = (latestClosePrice - stat.avgCost) * stat.qty; } });
+                openPositions.forEach(stat => { 
+                  if (stat.ticker === ticker) { 
+                    stat.currentPrice = latestClosePrice; 
+                    if (stat.positionType === 'SHORT' || stat.qty < 0) {
+                      stat.openPL = (stat.avgCost - latestClosePrice) * Math.abs(stat.qty);
+                    } else {
+                      stat.openPL = (latestClosePrice - stat.avgCost) * stat.qty;
+                    }
+                  } 
+                });
               }
             }
           } catch (error) {}
@@ -949,24 +963,34 @@ const handleAddPortfolio = async () => {
   const globalSharesClosed = statsArray.reduce((sum, stat) => sum + stat.sharesClosed, 0);
   const globalAvgDaysHeld = globalSharesClosed > 0 ? (globalTotalDaysHeld / globalSharesClosed).toFixed(1) : 0;
 
-  const totalOpenPL = statsArray.reduce((sum, stat) => sum + (stat.qty > 0 && stat.openPL ? stat.openPL : 0), 0);
+  const totalOpenPL = statsArray.reduce((sum, stat) => sum + (stat.qty !== 0 && stat.openPL ? stat.openPL : 0), 0);
   const currentPortfolioValue = parsedEquity > 0 ? (parsedEquity + totalRealizedPL + totalOpenPL) : 0;
 
-  const totalInvested = statsArray.reduce((sum, stat) => sum + (stat.qty * (stat.currentPrice || stat.avgCost)), 0);
+  const totalInvested = statsArray.reduce((sum, stat) => sum + (Math.abs(stat.qty) * (stat.currentPrice || stat.avgCost)), 0);
   const totalPosPct = currentPortfolioValue > 0 ? ((totalInvested / currentPortfolioValue) * 100).toFixed(2) : '--';
 
   const totalOpenHeat = statsArray.reduce((sum, stat) => {
-    if (stat.qty > 0) {
+    if (stat.qty !== 0) {
       const stopPrice = parseFloat(stopPrices[stat.id]?.current);
-      if (!isNaN(stopPrice) && stat.currentPrice > 0) return sum + ((stat.currentPrice - stopPrice) * stat.qty);
+      if (!isNaN(stopPrice) && stat.currentPrice > 0) {
+        const heat = stat.positionType === 'SHORT'
+          ? (stopPrice - stat.currentPrice) * Math.abs(stat.qty)
+          : (stat.currentPrice - stopPrice) * stat.qty;
+        return sum + heat;
+      }
     }
     return sum;
   }, 0);
 
   const totalOpenRisk = statsArray.reduce((sum, stat) => {
-    if (stat.qty > 0) {
+    if (stat.qty !== 0) {
       const stopPrice = parseFloat(stopPrices[stat.id]?.current);
-      if (!isNaN(stopPrice) && stat.avgCost > 0) return sum + ((stat.avgCost - stopPrice) * stat.qty);
+      if (!isNaN(stopPrice) && stat.avgCost > 0) {
+        const risk = stat.positionType === 'SHORT'
+          ? (stopPrice - stat.avgCost) * Math.abs(stat.qty)
+          : (stat.avgCost - stopPrice) * stat.qty;
+        return sum + risk;
+      }
     }
     return sum;
   }, 0);
@@ -987,19 +1011,22 @@ const handleAddPortfolio = async () => {
   if (calcMode === 'position') {
     calcCapitalAllocated = parsedTotalCapital * (parsedPositionPct / 100);
     calcShares = parsedEntryPrice > 0 ? Math.floor(calcCapitalAllocated / parsedEntryPrice) : 0;
-    if (parsedEntryPrice > 0 && parsedStopLoss > 0 && parsedEntryPrice > parsedStopLoss) {
-      calcOpenRiskDollar = calcShares * (parsedEntryPrice - parsedStopLoss);
+    if (parsedEntryPrice > 0 && parsedStopLoss > 0) {
+      const riskPerShare = Math.abs(parsedEntryPrice - parsedStopLoss);
+      calcOpenRiskDollar = calcShares * riskPerShare;
       if (parsedTotalCapital > 0) calcOpenRiskPct = (calcOpenRiskDollar / parsedTotalCapital) * 100;
     }
     calcPositionAllocPct = parsedPositionPct;
   } else {
-    if (parsedEntryPrice > 0 && parsedStopLoss > 0 && parsedEntryPrice > parsedStopLoss && parsedTotalCapital > 0) {
+    if (parsedEntryPrice > 0 && parsedStopLoss > 0 && parsedTotalCapital > 0) {
       calcOpenRiskDollar = parsedTotalCapital * (parsedRiskPct / 100);
-      const riskPerShare = parsedEntryPrice - parsedStopLoss;
-      calcShares = Math.floor(calcOpenRiskDollar / riskPerShare);
-      calcCapitalAllocated = calcShares * parsedEntryPrice;
-      calcPositionAllocPct = (calcCapitalAllocated / parsedTotalCapital) * 100;
-      calcOpenRiskPct = parsedRiskPct;
+      const riskPerShare = Math.abs(parsedEntryPrice - parsedStopLoss);
+      if (riskPerShare > 0) {
+        calcShares = Math.floor(calcOpenRiskDollar / riskPerShare);
+        calcCapitalAllocated = calcShares * parsedEntryPrice;
+        calcPositionAllocPct = (calcCapitalAllocated / parsedTotalCapital) * 100;
+        calcOpenRiskPct = parsedRiskPct;
+      }
     }
   }
 
@@ -1020,6 +1047,7 @@ const handleAddPortfolio = async () => {
       const totalTickerPositions = Object.values(tickerStats).filter(s => s.ticker === stat.ticker).length;
       const displayName = totalTickerPositions > 1 ? `${stat.ticker} (#${stat.positionNum})` : stat.ticker;
       const isClosed = stat.qty === 0;
+      const isShort = stat.positionType === 'SHORT';
       
       const posWinRate = stat.tradesClosed > 0 ? (stat.winningTrades / stat.tradesClosed) * 100 : 0;
       const posLossRate = stat.tradesClosed > 0 ? (stat.losingTrades / stat.tradesClosed) * 100 : 0;
@@ -1027,36 +1055,50 @@ const handleAddPortfolio = async () => {
       
       let daysHeldNum = 0;
       if (isClosed && stat.sharesClosed > 0) { daysHeldNum = stat.totalDaysHeld / stat.sharesClosed; } 
-      else if (!isClosed && stat.qty > 0) {
+      else if (!isClosed && stat.qty !== 0) {
         const today = new Date(); let totalOpenDays = 0;
         stat.openLots.forEach(lot => { const days = (today - lot.date) / (1000 * 60 * 60 * 24); totalOpenDays += Math.max(0, days) * lot.qty; });
-        daysHeldNum = totalOpenDays / stat.qty;
+        daysHeldNum = totalOpenDays / Math.abs(stat.qty);
       }
 
       const stopData = stopPrices[stat.id] || {};
       const stopPrice = parseFloat(stopData.current);
       const initialStop = parseFloat(stopData.initial);
 
-      const openRisk = !isClosed && !isNaN(stopPrice) ? (stat.avgCost - stopPrice) * stat.qty : null;
-      const openHeat = !isClosed && !isNaN(stopPrice) && stat.currentPrice > 0 ? (stat.currentPrice - stopPrice) * stat.qty : null;
+      const openRisk = !isClosed && !isNaN(stopPrice)
+        ? (isShort ? (stopPrice - stat.avgCost) * Math.abs(stat.qty) : (stat.avgCost - stopPrice) * stat.qty)
+        : null;
+
+      const openHeat = !isClosed && !isNaN(stopPrice) && stat.currentPrice > 0
+        ? (isShort ? (stopPrice - stat.currentPrice) * Math.abs(stat.qty) : (stat.currentPrice - stopPrice) * stat.qty)
+        : null;
       
-      const currentPosValue = stat.qty * (stat.currentPrice || stat.avgCost);
+      const currentPosValue = Math.abs(stat.qty) * (stat.currentPrice || stat.avgCost);
       const tablePosSizePctNum = !isClosed && currentPortfolioValue > 0 ? (currentPosValue / currentPortfolioValue) * 100 : 0;
       
-      const breakEvenPrice = !isClosed ? (stat.avgCost - (stat.realizedPL / stat.qty)) : null;
+      const breakEvenPrice = !isClosed 
+        ? (isShort ? (stat.avgCost + (stat.realizedPL / Math.abs(stat.qty))) : (stat.avgCost - (stat.realizedPL / stat.qty)))
+        : null;
+
       const breakEvenPct = !isClosed && stat.currentPrice > 0 ? ((breakEvenPrice / stat.currentPrice) - 1) * 100 : null;
-      const openPLPct = !isClosed && stat.avgCost > 0 && stat.currentPrice > 0 ? ((stat.currentPrice - stat.avgCost) / stat.avgCost) * 100 : 0;
+      
+      const openPLPct = !isClosed && stat.avgCost > 0 && stat.currentPrice > 0 
+        ? (isShort ? ((stat.avgCost - stat.currentPrice) / stat.avgCost) * 100 : ((stat.currentPrice - stat.avgCost) / stat.avgCost) * 100) 
+        : 0;
 
       let rMultipleNum = null;
-      if (!isClosed && stat.firstDayAvgCost > 0 && stat.currentPrice > 0 && !isNaN(initialStop) && stat.firstDayAvgCost > initialStop) {
-          const riskUnit = stat.firstDayAvgCost - initialStop;
-          rMultipleNum = (stat.currentPrice - stat.avgCost) / riskUnit;
+      if (!isClosed && stat.firstDayAvgCost > 0 && stat.currentPrice > 0 && !isNaN(initialStop)) {
+          const riskUnit = isShort ? (initialStop - stat.firstDayAvgCost) : (stat.firstDayAvgCost - initialStop);
+          if (riskUnit > 0) {
+            rMultipleNum = isShort ? (stat.avgCost - stat.currentPrice) / riskUnit : (stat.currentPrice - stat.avgCost) / riskUnit;
+          }
       }
 
       return {
         statObj: stat,
         displayName,
         isClosed,
+        isShort,
         posWinRate,
         posLossRate,
         posPF,
@@ -1073,7 +1115,7 @@ const handleAddPortfolio = async () => {
         rMultipleNum,
         sortValues: {
           Position: displayName,
-          Status: isClosed ? 1 : 0, 
+          Status: isClosed ? 2 : (isShort ? 1 : 0), 
           Qty: stat.qty,
           AvgEntry: stat.avgCost,
           PosPct: tablePosSizePctNum,
@@ -1366,8 +1408,8 @@ const handleAddPortfolio = async () => {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#555' }}>Action:</label>
                 <select value={manualTradeAction} onChange={(e) => setManualTradeAction(e.target.value)} style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', width: '180px', outline: 'none', boxSizing: 'border-box' }}>
-                  <option value="buy">BUY</option>
-                  <option value="sell">SELL</option>
+                  <option value="buy">BUY (Long / Cover)</option>
+                  <option value="sell">SELL (Short / Exit)</option>
                 </select>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1436,7 +1478,7 @@ const handleAddPortfolio = async () => {
             <div style={{ marginTop: '25px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '6px', border: '1px solid #ddd' }}>
               <h4 style={{ margin: '0 0 15px 0', color: '#333', textAlign: 'center' }}>Trade Execution Plan</h4>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-                <span style={{ fontSize: '13px', color: '#555' }}>Shares to Buy:</span>
+                <span style={{ fontSize: '13px', color: '#555' }}>Shares to Trade:</span>
                 <span style={{ fontSize: '16px', fontWeight: 'bold', color: '#1565c0' }}>{calcShares}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
@@ -1487,7 +1529,7 @@ const handleAddPortfolio = async () => {
               </div>
 
               {Object.values(tickerStats)
-                .filter(stat => showClosedPositions || stat.qty > 0)
+                .filter(stat => showClosedPositions || stat.qty !== 0)
                 .filter(stat => {
                    if (portfolioFilter === 'All') return true;
                    return stat.ticker === portfolioFilter;
@@ -1496,6 +1538,7 @@ const handleAddPortfolio = async () => {
                 .map(stat => {
                 const totalTickerPositions = Object.values(tickerStats).filter(s => s.ticker === stat.ticker).length;
                 const displayName = totalTickerPositions > 1 ? `${stat.ticker} (Trade #${stat.positionNum})` : stat.ticker;
+                const isShort = stat.positionType === 'SHORT';
                 
                 const posWinRate = stat.tradesClosed > 0 ? ((stat.winningTrades / stat.tradesClosed) * 100).toFixed(0) : 0;
                 const posLossRate = stat.tradesClosed > 0 ? ((stat.losingTrades / stat.tradesClosed) * 100).toFixed(0) : 0;
@@ -1506,46 +1549,62 @@ const handleAddPortfolio = async () => {
                 const stopPrice = parseFloat(stopData.current);
                 const initialStop = parseFloat(stopData.initial);
 
-                const openRisk = !isNaN(stopPrice) ? (stat.avgCost - stopPrice) * stat.qty : null;
-                const riskPct = !isNaN(stopPrice) && stat.avgCost > 0 ? (((stat.avgCost - stopPrice) / stat.avgCost) * 100).toFixed(2) : null;
+                const openRisk = !isNaN(stopPrice)
+                  ? (isShort ? (stopPrice - stat.avgCost) * Math.abs(stat.qty) : (stat.avgCost - stopPrice) * stat.qty)
+                  : null;
 
-                const breakEvenPrice = stat.qty > 0 ? stat.avgCost - (stat.realizedPL / stat.qty) : null;
+                const riskPct = !isNaN(stopPrice) && stat.avgCost > 0 
+                  ? (isShort ? (((stopPrice - stat.avgCost) / stat.avgCost) * 100).toFixed(2) : (((stat.avgCost - stopPrice) / stat.avgCost) * 100).toFixed(2)) 
+                  : null;
+
+                const breakEvenPrice = stat.qty !== 0 
+                  ? (isShort ? (stat.avgCost + (stat.realizedPL / Math.abs(stat.qty))) : (stat.avgCost - (stat.realizedPL / stat.qty))) 
+                  : null;
+
                 const breakEvenPct = breakEvenPrice !== null && stat.currentPrice > 0 ? ((breakEvenPrice / stat.currentPrice) - 1) * 100 : null;
                 const breakEvenPctStr = breakEvenPct !== null ? ` (${breakEvenPct > 0 ? '+' : ''}${breakEvenPct.toFixed(2)}%)` : '';
                 
                 let rMultiple = null;
                 let baseRiskPctStr = '';
-                if (stat.qty > 0 && stat.firstDayAvgCost > 0 && stat.currentPrice > 0 && !isNaN(initialStop) && stat.firstDayAvgCost > initialStop) {
-                    const riskUnit = stat.firstDayAvgCost - initialStop;
-                    rMultiple = ((stat.currentPrice - stat.avgCost) / riskUnit).toFixed(2);
-                    const baseRiskPct = (riskUnit / stat.firstDayAvgCost) * 100;
-                    baseRiskPctStr = `<${baseRiskPct.toFixed(2)}%>`;
+                if (stat.qty !== 0 && stat.firstDayAvgCost > 0 && stat.currentPrice > 0 && !isNaN(initialStop)) {
+                    const riskUnit = isShort ? (initialStop - stat.firstDayAvgCost) : (stat.firstDayAvgCost - initialStop);
+                    if (riskUnit > 0) {
+                      rMultiple = isShort ? ((stat.avgCost - stat.currentPrice) / riskUnit).toFixed(2) : ((stat.currentPrice - stat.avgCost) / riskUnit).toFixed(2);
+                      const baseRiskPct = (riskUnit / stat.firstDayAvgCost) * 100;
+                      baseRiskPctStr = `<${baseRiskPct.toFixed(2)}%>`;
+                    }
                 }
                 
-                const currentPosValue = stat.qty * (stat.currentPrice || stat.avgCost);
+                const currentPosValue = Math.abs(stat.qty) * (stat.currentPrice || stat.avgCost);
                 const indPosSizePct = currentPortfolioValue > 0 ? ((currentPosValue / currentPortfolioValue) * 100).toFixed(2) + '%' : '--';
 
-                const openHeat = !isNaN(stopPrice) && stat.currentPrice > 0 ? (stat.currentPrice - stopPrice) * stat.qty : null;
+                const openHeat = !isNaN(stopPrice) && stat.currentPrice > 0 
+                  ? (isShort ? (stopPrice - stat.currentPrice) * Math.abs(stat.qty) : (stat.currentPrice - stopPrice) * stat.qty) 
+                  : null;
+
                 const openHeatPctVal = currentPortfolioValue > 0 && openHeat !== null ? ((openHeat / currentPortfolioValue) * 100).toFixed(2) : '0.00';
-                const openPLPct = stat.qty > 0 && stat.avgCost > 0 && stat.currentPrice > 0 ? ((stat.currentPrice - stat.avgCost) / stat.avgCost) * 100 : 0;
+                
+                const openPLPct = stat.qty !== 0 && stat.avgCost > 0 && stat.currentPrice > 0 
+                  ? (isShort ? ((stat.avgCost - stat.currentPrice) / stat.avgCost) * 100 : ((stat.currentPrice - stat.avgCost) / stat.avgCost) * 100) 
+                  : 0;
 
                 return (
                   <div key={stat.id} onClick={() => { setSelectedTicker(stat.ticker); setActiveTab('chart'); setPortfolioFilter(stat.ticker); setHistoryFilter(stat.id); }} style={{ padding: '12px', backgroundColor: '#fff', border: '1px solid #e0e0e0', borderRadius: '6px', marginBottom: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', cursor: 'pointer' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '16px', marginBottom: '8px' }}>
-                      <span>{displayName} <span style={{fontSize: '13px', color: '#666', fontWeight: 'normal'}}>(Qty: {stat.qty})</span></span>
-                      <span>${stat.currentPrice && stat.qty > 0 ? stat.currentPrice.toFixed(2) : '--'}</span>
+                      <span>{displayName} <span style={{fontSize: '11px', color: isShort ? '#8e24aa' : '#1565c0', fontWeight: 'bold'}}>[{isShort ? 'SHORT' : 'LONG'}]</span> <span style={{fontSize: '13px', color: '#666', fontWeight: 'normal'}}>(Qty: {stat.qty})</span></span>
+                      <span>${stat.currentPrice && stat.qty !== 0 ? stat.currentPrice.toFixed(2) : '--'}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginBottom: '4px' }}>
                       <span style={{ color: '#555' }}>Realized P/L:</span>
                       <span style={{ color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: '600' }}>{stat.realizedPL >= 0 ? '+' : ''}${stat.realizedPL.toFixed(2)}</span>
                     </div>
-                    {stat.qty > 0 && (
+                    {stat.qty !== 0 && (
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginBottom: '8px' }}>
                         <span style={{ color: '#555' }}>Open P/L:</span>
                         <span style={{ color: stat.openPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: '600' }}>{stat.openPL >= 0 ? '+' : ''}${stat.openPL.toFixed(2)} ({openPLPct >= 0 ? '+' : ''}{openPLPct.toFixed(2)}%)</span>
                       </div>
                     )}
-                    {stat.qty > 0 && (
+                    {stat.qty !== 0 && (
                       <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed #eee' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '4px' }}>
                           <span style={{ color: '#555' }}>Avg Entry Price:</span>
@@ -1619,7 +1678,7 @@ const handleAddPortfolio = async () => {
                     <optgroup key={ticker} label={ticker}>
                       <option value={ticker}>All {ticker}</option>
                       {cycles.map(c => (
-                        <option key={c.id} value={c.id}>{c.ticker} #{c.positionNum} ({c.qty > 0 ? 'OPEN' : 'CLOSED'})</option>
+                        <option key={c.id} value={c.id}>{c.ticker} #{c.positionNum} ({c.qty !== 0 ? (c.positionType === 'SHORT' ? 'SHORT' : 'OPEN') : 'CLOSED'})</option>
                       ))}
                     </optgroup>
                   );
@@ -1676,9 +1735,7 @@ const handleAddPortfolio = async () => {
         {/* RIGHT CONTENT AREA: 20% / 60% / 20% Strict Flex Layout */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#fff', overflow: 'hidden' }}>
           
-          {/* ----------------------------------------------- */}
           {/* AREA 1: TOP 20% - Analytics Dashboard */}
-          {/* ----------------------------------------------- */}
           <div style={{ height: '20%', flexShrink: 0, padding: '15px 20px', overflowY: 'auto', borderBottom: '1px solid #ddd', boxSizing: 'border-box' }}>
             {statsArray.length > 0 && (
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
@@ -1710,13 +1767,13 @@ const handleAddPortfolio = async () => {
                     ${totalInvested.toFixed(0)} <span style={{fontSize: '10px', fontWeight: 'normal'}}>({totalPosPct}%)</span>
                   </div>
                 </div>
-                <div title="Amount of open equity at risk: (Current Price - Stop Price) × Open Shares." style={{ flex: 1, minWidth: '110px', padding: '8px', backgroundColor: '#e3f2fd', borderRadius: '6px', border: '1px solid #bbdefb', cursor: 'help' }}>
+                <div title="Amount of open equity at risk relative to stop prices." style={{ flex: 1, minWidth: '110px', padding: '8px', backgroundColor: '#e3f2fd', borderRadius: '6px', border: '1px solid #bbdefb', cursor: 'help' }}>
                   <div style={{ fontSize: '10px', color: '#1565c0', textTransform: 'uppercase', fontWeight: 'bold' }}>Total Open Heat</div>
                   <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#1565c0' }}>
                     {totalOpenHeat >= 0 ? '+' : '-'}${Math.abs(totalOpenHeat).toFixed(2)} <span style={{fontSize: '10px', fontWeight: 'normal'}}>({totalOpenHeatPct}%)</span>
                   </div>
                 </div>
-                <div title="Amount of initial capital at risk: (Avg Cost - Stop Price) × Open Shares. % is based on Account Equity." style={{ flex: 1, minWidth: '110px', padding: '8px', backgroundColor: '#fff3e0', borderRadius: '6px', border: '1px solid #ffe0b2', cursor: 'help' }}>
+                <div title="Amount of initial capital at risk relative to stop prices." style={{ flex: 1, minWidth: '110px', padding: '8px', backgroundColor: '#fff3e0', borderRadius: '6px', border: '1px solid #ffe0b2', cursor: 'help' }}>
                   <div style={{ fontSize: '10px', color: '#e65100', textTransform: 'uppercase', fontWeight: 'bold' }}>Total Open Risk</div>
                   <div style={{ fontSize: '14px', fontWeight: 'bold', color: totalOpenRisk > 0 ? '#d32f2f' : '#2e7d32' }}>
                     {totalOpenRisk >= 0 ? '' : '-'}${Math.abs(totalOpenRisk).toFixed(2)} <span style={{fontSize: '10px', fontWeight: 'normal'}}>({globalRiskPct}%)</span>
@@ -1761,9 +1818,7 @@ const handleAddPortfolio = async () => {
             )}
           </div>
 
-          {/* ----------------------------------------------- */}
           {/* AREA 2: MIDDLE 60% - Main Content (Chart/Table) */}
-          {/* ----------------------------------------------- */}
           <div style={{ height: '60%', flexShrink: 0, display: 'flex', flexDirection: 'column', padding: '0 20px', boxSizing: 'border-box', overflow: 'hidden' }}>
             
             {/* TAB NAVIGATION */}
@@ -1836,6 +1891,7 @@ const handleAddPortfolio = async () => {
                   {tableData.map((row, index) => {
                       const stat = row.statObj;
                       const isClosed = row.isClosed;
+                      const isShort = row.isShort;
                       
                       const displayWinRate = stat.tradesClosed > 0 ? row.posWinRate.toFixed(0) + '%' : '--';
                       const displayLossRate = stat.tradesClosed > 0 ? row.posLossRate.toFixed(0) + '%' : '--';
@@ -1843,24 +1899,30 @@ const handleAddPortfolio = async () => {
                       
                       let displayDaysHeld = '--';
                       if (isClosed && stat.sharesClosed > 0) { displayDaysHeld = row.daysHeldNum.toFixed(1); } 
-                      else if (!isClosed && stat.qty > 0) { displayDaysHeld = row.daysHeldNum.toFixed(1); }
+                      else if (!isClosed && stat.qty !== 0) { displayDaysHeld = row.daysHeldNum.toFixed(1); }
                       
                       const tablePosSizePctStr = !isClosed && currentPortfolioValue > 0 ? row.tablePosSizePctNum.toFixed(2) + '%' : '--';
                       
                       const breakEvenPctStr = row.breakEvenPct !== null ? ` (${row.breakEvenPct > 0 ? '+' : ''}${row.breakEvenPct.toFixed(2)}%)` : '';
 
                       let baseRiskPctStr = '';
-                      if (!isClosed && stat.firstDayAvgCost > 0 && stat.currentPrice > 0 && !isNaN(row.initialStop) && stat.firstDayAvgCost > row.initialStop) {
-                          const riskUnit = stat.firstDayAvgCost - row.initialStop;
-                          const baseRiskPct = (riskUnit / stat.firstDayAvgCost) * 100;
-                          baseRiskPctStr = `<${baseRiskPct.toFixed(2)}%>`;
+                      if (!isClosed && stat.firstDayAvgCost > 0 && stat.currentPrice > 0 && !isNaN(row.initialStop)) {
+                          const riskUnit = isShort ? (row.initialStop - stat.firstDayAvgCost) : (stat.firstDayAvgCost - row.initialStop);
+                          if (riskUnit > 0) {
+                            const baseRiskPct = (riskUnit / stat.firstDayAvgCost) * 100;
+                            baseRiskPctStr = `<${baseRiskPct.toFixed(2)}%>`;
+                          }
                       }
 
                       return (
                         <tr key={stat.id} style={{ borderBottom: '1px solid #eee', backgroundColor: index % 2 === 0 ? '#fff' : '#fafafa', transition: 'background-color 0.2s', cursor: 'pointer' }} onClick={() => { setSelectedTicker(stat.ticker); setActiveTab('chart'); setPortfolioFilter(stat.ticker); setHistoryFilter(stat.id); }} onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f1f8ff'} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = index % 2 === 0 ? '#fff' : '#fafafa'}>
                           <td style={{ padding: '12px 10px', fontWeight: 'bold' }}>{row.displayName}</td>
-                          <td style={{ padding: '12px 10px', textAlign: 'center' }}><span style={{ padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 'bold', backgroundColor: isClosed ? '#e0e0e0' : '#bbdefb', color: isClosed ? '#666' : '#1565c0' }}>{isClosed ? 'CLOSED' : 'OPEN'}</span></td>
-                          <td style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 'bold' }}>{stat.qty}</td>
+                          <td style={{ padding: '12px 10px', textAlign: 'center' }}>
+                            <span style={{ padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 'bold', backgroundColor: isClosed ? '#e0e0e0' : (isShort ? '#f3e5f5' : '#bbdefb'), color: isClosed ? '#666' : (isShort ? '#7b1fa2' : '#1565c0') }}>
+                              {isClosed ? 'CLOSED' : (isShort ? 'SHORT' : 'LONG')}
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 'bold', color: stat.qty < 0 ? '#8e24aa' : '#333' }}>{stat.qty}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333', fontWeight: 'bold' }}>{isClosed ? '--' : '$' + stat.avgCost.toFixed(2)}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333' }}>{tablePosSizePctStr}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{stat.realizedPL >= 0 ? '+' : ''}{stat.realizedPL === 0 ? '--' : '$' + stat.realizedPL.toFixed(2)}</td>
@@ -1936,16 +1998,14 @@ const handleAddPortfolio = async () => {
             </div>
           </div>
 
-          {/* ----------------------------------------------- */}
-          {/* AREA 3: BOTTOM 20% - Trade Analytics / Notes  */}
-          {/* ----------------------------------------------- */}
+          {/* AREA 3: BOTTOM 20% - Trade Analytics / Notes */}
           <div style={{ height: '20%', flexShrink: 0, padding: '15px 20px', overflowY: 'auto', borderTop: '1px solid #ddd', backgroundColor: '#fcfcfc', boxSizing: 'border-box' }}>
             
             {selectedTicker ? (
               <div style={{ paddingBottom: '20px' }}>
                 
                 {Object.values(tickerStats)
-                  .filter(stat => stat.ticker === selectedTicker && stat.qty > 0)
+                  .filter(stat => stat.ticker === selectedTicker && stat.qty !== 0)
                   .map((stat) => {
                     const totalTickerPositions = Object.values(tickerStats).filter(s => s.ticker === stat.ticker).length;
                     const displayName = totalTickerPositions > 1 ? `${stat.ticker} (Active Trade #${stat.positionNum})` : stat.ticker;
@@ -1953,7 +2013,7 @@ const handleAddPortfolio = async () => {
 
                     return (
                       <div key={stat.id} style={{ marginBottom: '15px', padding: '12px', backgroundColor: '#e3f2fd', borderRadius: '8px', border: '1px solid #90caf9' }}>
-                        <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: '#1565c0' }}>{displayName} Trade Notes</h4>
+                        <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: '#1565c0' }}>{displayName} [{stat.positionType}] Trade Notes</h4>
                         <div>
                           <div style={{ display: 'flex', gap: '10px', marginBottom: '8px' }}>
                             <select 
@@ -1996,7 +2056,7 @@ const handleAddPortfolio = async () => {
 
                     return (
                       <div key={stat.id} style={{ marginBottom: '15px', padding: '12px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0' }}>
-                        <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: '#333' }}>{displayName} Closed Position Analytics</h4>
+                        <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: '#333' }}>{displayName} [{stat.positionType}] Closed Position Analytics</h4>
                         <div style={{ display: 'flex', gap: '15px', flexWrap: 'wrap' }}>
                           <div style={{ flex: 1, minWidth: '120px', padding: '8px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #ddd' }}>
                             <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', fontWeight: 'bold' }}>Days to Hold</div>

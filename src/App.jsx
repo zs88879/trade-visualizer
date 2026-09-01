@@ -132,6 +132,7 @@ export default function App() {
   const [manualTradePrice, setManualTradePrice] = useState('');
   const [manualTradeQty, setManualTradeQty] = useState('');
   const [manualTradePortfolio, setManualTradePortfolio] = useState('');
+  const [manualTradeCommission, setManualTradeCommission] = useState('0'); // <--- ADD THIS
 
   // --- Calculator State ---
   const [calcMode, setCalcMode] = useState('position');
@@ -401,14 +402,28 @@ export default function App() {
       return;
     }
 
+    const parsedPrice = parseFloat(manualTradePrice);
+    const parsedQty = Math.abs(parseInt(manualTradeQty, 10));
+    const parsedCommission = parseFloat(manualTradeCommission) || 0;
+
+    // Adjust price to bake the commission into the average cost
+    let effectivePrice = parsedPrice;
+    if (parsedCommission > 0 && parsedQty > 0) {
+      if (manualTradeAction === 'buy') {
+        effectivePrice = parsedPrice + (parsedCommission / parsedQty);
+      } else {
+        effectivePrice = parsedPrice - (parsedCommission / parsedQty);
+      }
+    }
+
     const targetPortfolio = manualTradePortfolio || selectedPortfolio;
     const newTrade = {
       portfolio: targetPortfolio,
       trade_date: manualTradeDate,
       ticker: manualTradeTicker.toUpperCase().trim(),
       action: manualTradeAction,
-      price: parseFloat(manualTradePrice),
-      quantity: Math.abs(parseInt(manualTradeQty, 10))
+      price: effectivePrice, // <--- Send the commission-adjusted price to the DB
+      quantity: parsedQty
     };
 
     try {
@@ -419,6 +434,7 @@ export default function App() {
       setManualTradeTicker('');
       setManualTradePrice('');
       setManualTradeQty('');
+      setManualTradeCommission('0'); // <--- Reset commission back to 0
       setManualTradeDate(new Date().toISOString().split('T')[0]); 
       setManualTradeAction('buy');
       
@@ -1419,6 +1435,11 @@ export default function App() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#555' }}>Quantity:</label>
                 <input type="number" min="1" step="1" value={manualTradeQty} onChange={(e) => setManualTradeQty(e.target.value)} required placeholder="0" style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', width: '180px', outline: 'none', boxSizing: 'border-box' }} />
+              </div>
+              {/* NEW Commission Input */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#555' }}>Commission ($):</label>
+                <input type="number" min="0" step="0.01" value={manualTradeCommission} onChange={(e) => setManualTradeCommission(e.target.value)} placeholder="0.00" style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', width: '180px', outline: 'none', boxSizing: 'border-box' }} />
               </div>
               <button type="submit" style={{ marginTop: '10px', padding: '10px', backgroundColor: '#43a047', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>Save Trade</button>
             </form>

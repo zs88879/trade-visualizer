@@ -487,6 +487,13 @@ export default function App() {
     }
   };
 
+  const handleManualPriceChange = (statId, value) => {
+    setManualOptionPrices(prev => ({
+      ...prev,
+      [statId]: value
+    }));
+  };
+
   const handleDeleteTrade = async (tradeId, e) => {
     e.stopPropagation(); // Prevents triggering the parent click event (which selects the ticker chart)
     if (!window.confirm("Are you sure you want to delete this trade?")) return;
@@ -1150,9 +1157,12 @@ export default function App() {
 
       const breakEvenPct = !isClosed && stat.currentPrice > 0 ? ((breakEvenPrice / stat.currentPrice) - 1) * 100 : null;
       
-      const openPLPct = !isClosed && stat.avgCost > 0 && stat.currentPrice > 0 
-        ? (isShort ? ((stat.avgCost - stat.currentPrice) / stat.avgCost) * 100 : ((stat.currentPrice - stat.avgCost) / stat.avgCost) * 100) 
-        : 0;
+      // Inside your sidebar mapping for open positions:
+      const manualOverride = parseFloat(manualOptionPrices[stat.id]);
+      const effectiveCurrentPrice = !isNaN(manualOverride) ? manualOverride : (stat.currentPrice || 0);
+
+      const openPL = !isClosed && stat.qty > 0 && effectiveCurrentPrice > 0 ? (effectiveCurrentPrice - stat.avgCost) * stat.qty : 0;
+      const openPLPct = !isClosed && stat.qty > 0 && stat.avgCost > 0 && effectiveCurrentPrice > 0 ? ((effectiveCurrentPrice - stat.avgCost) / stat.avgCost) * 100 : 0;
 
       let rMultipleNum = null;
       if (!isClosed && stat.firstDayAvgCost > 0 && stat.currentPrice > 0 && !isNaN(initialStop)) {
@@ -1738,7 +1748,24 @@ export default function App() {
                           <span style={{ color: '#555' }}>R Multiple {baseRiskPctStr}:</span>
                           <span style={{ color: rMultiple > 0 ? '#2e7d32' : (rMultiple < 0 ? '#d32f2f' : '#333'), fontWeight: 'bold' }}>{rMultiple !== null ? `${rMultiple}R` : '--'}</span>
                         </div>
-                        
+
+                        {/* CURRENT PRICE MANUAL OVERRIDE INPUT (ADD HERE) */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px', marginBottom: '4px' }}>
+                          <span style={{ color: '#555' }}>Contract Price:</span>
+                          <div style={{ position: 'relative' }}>
+                            <span style={{ position: 'absolute', left: '6px', top: '50%', transform: 'translateY(-50%)', color: '#888', fontSize: '12px' }}>$</span>
+                            <input 
+                              type="number" 
+                              step="0.05" 
+                              value={manualOptionPrices[stat.id] !== undefined ? manualOptionPrices[stat.id] : (stat.currentPrice || '')} 
+                              onChange={(e) => handleManualPriceChange(stat.id, e.target.value)} 
+                              onClick={(e) => e.stopPropagation()} 
+                              style={{ width: '80px', padding: '2px 4px 2px 16px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '13px', outline: 'none' }} 
+                              placeholder="0.00" 
+                            />
+                          </div>
+                        </div>
+                                                
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px', marginBottom: '4px' }}>
                           <span style={{ color: '#555' }}>Initial Stop:</span>
                           <div style={{ position: 'relative' }}>

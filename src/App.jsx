@@ -57,6 +57,10 @@ function generateOutlookAnalysis(ticker, newsItems) {
   analysis += `Overall, the focus remains firmly on executing fundamental business operations and product roadmap delivery rather than immediate market fluctuations.`;
   return analysis;
 }
+
+function getEasternDateString() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+}
 // ------------------------------------------------
 
 export default function App() {
@@ -186,10 +190,6 @@ export default function App() {
   const isOptionTicker = (ticker) => {
     // Checks if the ticker string contains a strike and a C/P designation (e.g. "150C" or "150 P")
     return /[0-9]+(\.[0-9]+)?[CP]\s*\(?/i.test(ticker);
-  };
-
-  const getEasternDateString = () => {
-    return new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
   };
 
   const requestSort = (key) => {

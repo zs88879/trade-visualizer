@@ -126,7 +126,7 @@ export default function App() {
   const [newPortfolio, setNewPortfolio] = useState('');
 
 // --- Manual Trade Entry State ---
-  const [manualTradeDate, setManualTradeDate] = useState(new Date().toISOString().split('T')[0]);
+  const [manualTradeDate, setManualTradeDate] = useState(getEasternDateString());
   const [manualTradeTicker, setManualTradeTicker] = useState('');
   const [manualTradeAction, setManualTradeAction] = useState('buy');
   const [manualTradePrice, setManualTradePrice] = useState('');
@@ -186,6 +186,10 @@ export default function App() {
   const isOptionTicker = (ticker) => {
     // Checks if the ticker string contains a strike and a C/P designation (e.g. "150C" or "150 P")
     return /[0-9]+(\.[0-9]+)?[CP]\s*\(?/i.test(ticker);
+  };
+
+  const getEasternDateString = () => {
+    return new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
   };
 
   const requestSort = (key) => {
@@ -476,7 +480,7 @@ export default function App() {
       setManualStrike('');
       setManualExpiration('');
       setManualAssetType('stock');
-      setManualTradeDate(new Date().toISOString().split('T')[0]); 
+      setManualTradeDate(getEasternDateString());
       setManualTradeAction('buy');
       
       if (targetPortfolio === selectedPortfolio) {

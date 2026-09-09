@@ -1225,6 +1225,7 @@ export default function App() {
           Status: isClosed ? 2 : (isShort ? 1 : 0), 
           Qty: stat.qty,
           AvgEntry: stat.avgCost,
+          CurrentPrice: isClosed ? -Infinity : (stat.currentPrice || 0),
           PosPct: tablePosSizePctNum,
           RealizedPL: stat.realizedPL,
           OpenPL: isClosed ? -Infinity : stat.openPL,
@@ -2057,6 +2058,7 @@ export default function App() {
                     {renderSortableTH('Status', 'Status', 'center')}
                     {renderSortableTH('Qty', 'Qty', 'right')}
                     {renderSortableTH('Avg Entry', 'AvgEntry', 'right')}
+                    {renderSortableTH('Current Price', 'CurrentPrice', 'right')}
                     {renderSortableTH('Pos %', 'PosPct', 'right', 'Percentage of Account Equity allocated to this position.')}
                     {renderSortableTH('Realized P/L', 'RealizedPL', 'right')}
                     {renderSortableTH('Open P/L', 'OpenPL', 'right')}
@@ -2108,6 +2110,9 @@ export default function App() {
                           </td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 'bold', color: stat.qty < 0 ? '#8e24aa' : '#333' }}>{stat.qty}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333', fontWeight: 'bold' }}>{isClosed ? '--' : '$' + stat.avgCost.toFixed(2)}</td>
+                          <td style={{ padding: '12px 10px', textAlign: 'right', color: '#1565c0', fontWeight: 'bold' }}>
+                            {isClosed || !stat.currentPrice ? '--' : '$' + stat.currentPrice.toFixed(2)}
+                          </td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333' }}>{tablePosSizePctStr}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{stat.realizedPL >= 0 ? '+' : ''}{stat.realizedPL === 0 ? '--' : '$' + stat.realizedPL.toFixed(2)}</td>
                           <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.openPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{isClosed ? '--' : (stat.openPL >= 0 ? '+' : '') + '$' + stat.openPL.toFixed(2)}</td>

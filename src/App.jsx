@@ -136,7 +136,7 @@ export default function App() {
   const [manualTradePrice, setManualTradePrice] = useState('');
   const [manualTradeQty, setManualTradeQty] = useState('');
   const [manualTradePortfolio, setManualTradePortfolio] = useState('');
-  const [manualTradeCommission, setManualTradeCommission] = useState('0');
+  const [manualTradeCommission, setManualTradeCommission] = useState('');
   const [isSubmittingTrade, setIsSubmittingTrade] = useState(false); // <--- ADD THIS  
 
   const [manualAssetType, setManualAssetType] = useState('stock'); // 'stock' or 'option'
@@ -476,7 +476,7 @@ export default function App() {
       setManualTradeTicker('');
       setManualTradePrice('');
       setManualTradeQty('');
-      setManualTradeCommission('0');
+      setManualTradeCommission('');
       setManualStrike('');
       setManualExpiration('');
       setManualAssetType('stock');

@@ -441,20 +441,9 @@ export default function App() {
     // Apply 100x multiplier if it's an option contract
     const multiplier = manualAssetType === 'option' ? 100 : 1;
 
-    let effectivePrice = parsedPrice;
-    if (parsedCommission > 0 && parsedQty > 0) {
-      const feePerUnit = parsedCommission / (parsedQty * multiplier);
-      if (manualTradeAction === 'buy') {
-        effectivePrice = parsedPrice + feePerUnit;
-      } else {
-        effectivePrice = parsedPrice - feePerUnit;
-      }
-    }
-
-    // Format ticker name neatly for options (e.g. AAPL 150C 06/19/26)
+    // Format ticker name neatly for options (e.g. AAPL 150C (2026-06-19))
     let finalTicker = manualTradeTicker.toUpperCase().trim();
     if (manualAssetType === 'option') {
-      const formattedDate = manualExpiration.split('-').reverse().join(''); // or keep standard yyyy-mm-dd
       finalTicker = `${finalTicker} ${manualStrike}${manualOptionType.toUpperCase()[0]} (${manualExpiration})`;
     }
 
@@ -464,8 +453,9 @@ export default function App() {
       trade_date: manualTradeDate,
       ticker: finalTicker,
       action: manualTradeAction,
-      price: effectivePrice,
-      quantity: parsedQty * multiplier // Store total underlying equivalent shares/contracts cleanly
+      price: parsedPrice, // Raw entry price without commission baked in
+      quantity: parsedQty * multiplier, // Scaled by 100x for options
+      commission: parsedCommission // Saved separately for net P/L calculations
     };
 
     try {
@@ -476,11 +466,11 @@ export default function App() {
       setManualTradeTicker('');
       setManualTradePrice('');
       setManualTradeQty('');
-      setManualTradeCommission('');
+      setManualTradeCommission(''); // Reset to empty string
       setManualStrike('');
       setManualExpiration('');
       setManualAssetType('stock');
-      setManualTradeDate(getEasternDateString());
+      setManualTradeDate(getEasternDateString()); // Reset to current Eastern time date
       setManualTradeAction('buy');
       
       if (targetPortfolio === selectedPortfolio) {
@@ -668,30 +658,59 @@ export default function App() {
     setOutlookIsFetching(false);
   };
 
-  // Helper to re-calculate Equity Curve with full consistency between Realized + Open P/L
-  const calculateEquityCurve = (realizedEventsList, statsObj, baseEquity) => {
-    realizedEventsList.sort((a, b) => a.dateObj - b.dateObj);
-    let cumulativeCurvePL = baseEquity > 0 ? baseEquity : 0;
-    const curveMap = {};
+const calculateEquityCurve = (realizedEventsList, statsObj, baseEquity) => {
+    if (realizedEventsList.length === 0) return [];
 
-    realizedEventsList.forEach(e => {
-      cumulativeCurvePL += e.pl;
-      curveMap[e.date] = cumulativeCurvePL;
+    // Sort realized events strictly oldest to newest
+    const sortedEvents = [...realizedEventsList].sort((a, b) => a.dateObj - b.dateObj);
+    
+    let runningEquity = baseEquity > 0 ? baseEquity : 0;
+    const dailyMap = {};
+
+    // Map each trade date to its cumulative P/L impact
+    sortedEvents.forEach(e => {
+      runningEquity += e.pl;
+      dailyMap[e.date] = runningEquity;
     });
 
-    const todayStr = new Date().toISOString().split('T')[0];
+    const dates = Object.keys(dailyMap).sort();
+    if (dates.length === 0) return [];
+
+    const startDateStr = dates[0];
+    const todayStr = getEasternDateString(); // Use your Eastern time helper safely!
+
+    let currentVal = baseEquity > 0 ? baseEquity : 0;
+    const fullCurveData = [];
+    
+    // Generate every single calendar day between start and today to ensure smooth curve rendering
+    let curr = new Date(startDateStr);
+    const end = new Date(todayStr);
+
+    while (curr <= end) {
+      const dateStr = curr.toISOString().split('T')[0];
+      
+      if (dailyMap[dateStr] !== undefined) {
+        currentVal = dailyMap[dateStr];
+      }
+      
+      fullCurveData.push({
+        time: dateStr,
+        value: currentVal
+      });
+
+      curr.setDate(curr.getDate() + 1);
+    }
+
+    // Ensure the final live open portfolio value is accurately reflected at the tail end
     const totalRealized = Object.values(statsObj).reduce((sum, st) => sum + st.realizedPL, 0);
     const totalOpen = Object.values(statsObj).reduce((sum, st) => sum + (st.qty !== 0 && st.openPL ? st.openPL : 0), 0);
     const livePortfolioVal = baseEquity > 0 ? (baseEquity + totalRealized + totalOpen) : (totalRealized + totalOpen);
 
-    if (livePortfolioVal !== 0 || Object.keys(curveMap).length > 0) {
-      curveMap[todayStr] = livePortfolioVal;
+    if (fullCurveData.length > 0 && livePortfolioVal !== 0) {
+      fullCurveData[fullCurveData.length - 1].value = livePortfolioVal;
     }
 
-    return Object.keys(curveMap).sort().map(dateStr => ({
-      time: dateStr,
-      value: curveMap[dateStr]
-    }));
+    return fullCurveData;
   };
 
   useEffect(() => {

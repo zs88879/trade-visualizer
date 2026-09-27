@@ -662,10 +662,9 @@ const calculateEquityCurve = (realizedEventsList, statsObj, baseEquity) => {
     let runningEquity = baseEquity > 0 ? baseEquity : 0;
     const dailyMap = {};
 
+    // 1. Process all realized events chronologically
     if (realizedEventsList && realizedEventsList.length > 0) {
-      // Sort realized events strictly oldest to newest
       const sortedEvents = [...realizedEventsList].sort((a, b) => a.dateObj - b.dateObj);
-      
       sortedEvents.forEach(e => {
         runningEquity += e.pl;
         dailyMap[e.date] = runningEquity;
@@ -677,7 +676,6 @@ const calculateEquityCurve = (realizedEventsList, statsObj, baseEquity) => {
     const totalOpen = Object.values(statsObj).reduce((sum, st) => sum + (st.qty !== 0 && st.openPL ? st.openPL : 0), 0);
     const livePortfolioVal = baseEquity > 0 ? (baseEquity + totalRealized + totalOpen) : (totalRealized + totalOpen);
 
-    // Always ensure today has the latest live value
     dailyMap[todayStr] = livePortfolioVal !== 0 ? livePortfolioVal : runningEquity;
 
     const dates = Object.keys(dailyMap).sort();
@@ -686,7 +684,6 @@ const calculateEquityCurve = (realizedEventsList, statsObj, baseEquity) => {
     const startDateStr = dates[0];
     const fullCurveData = [];
     
-    // Safely parse dates using local components to avoid timezone shift bugs
     const [startYear, startMonth, startDay] = startDateStr.split('-').map(Number);
     const [endYear, endMonth, endDay] = todayStr.split('-').map(Number);
     
@@ -713,14 +710,13 @@ const calculateEquityCurve = (realizedEventsList, statsObj, baseEquity) => {
       curr.setDate(curr.getDate() + 1);
     }
 
-    // Ensure the final data point matches the exact live portfolio value
     if (fullCurveData.length > 0) {
       fullCurveData[fullCurveData.length - 1].value = livePortfolioVal !== 0 ? livePortfolioVal : currentVal;
     }
 
     return fullCurveData;
   };
-  
+    
   useEffect(() => {
     if (trades.length === 0) {
       setTickerStats({}); setMonthlyStats({}); setAnalyzedTrades([]); setEquityCurveData([]);

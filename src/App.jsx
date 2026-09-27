@@ -659,35 +659,47 @@ export default function App() {
   };
 
 const calculateEquityCurve = (realizedEventsList, statsObj, baseEquity) => {
-    if (realizedEventsList.length === 0) return [];
-
-    // Sort realized events strictly oldest to newest
-    const sortedEvents = [...realizedEventsList].sort((a, b) => a.dateObj - b.dateObj);
-    
     let runningEquity = baseEquity > 0 ? baseEquity : 0;
     const dailyMap = {};
 
-    // Map each trade date to its cumulative P/L impact
-    sortedEvents.forEach(e => {
-      runningEquity += e.pl;
-      dailyMap[e.date] = runningEquity;
-    });
+    if (realizedEventsList && realizedEventsList.length > 0) {
+      // Sort realized events strictly oldest to newest
+      const sortedEvents = [...realizedEventsList].sort((a, b) => a.dateObj - b.dateObj);
+      
+      sortedEvents.forEach(e => {
+        runningEquity += e.pl;
+        dailyMap[e.date] = runningEquity;
+      });
+    }
+
+    const todayStr = getEasternDateString();
+    const totalRealized = Object.values(statsObj).reduce((sum, st) => sum + st.realizedPL, 0);
+    const totalOpen = Object.values(statsObj).reduce((sum, st) => sum + (st.qty !== 0 && st.openPL ? st.openPL : 0), 0);
+    const livePortfolioVal = baseEquity > 0 ? (baseEquity + totalRealized + totalOpen) : (totalRealized + totalOpen);
+
+    // Always ensure today has the latest live value
+    dailyMap[todayStr] = livePortfolioVal !== 0 ? livePortfolioVal : runningEquity;
 
     const dates = Object.keys(dailyMap).sort();
     if (dates.length === 0) return [];
 
     const startDateStr = dates[0];
-    const todayStr = getEasternDateString(); // Use your Eastern time helper safely!
-
-    let currentVal = baseEquity > 0 ? baseEquity : 0;
     const fullCurveData = [];
     
-    // Generate every single calendar day between start and today to ensure smooth curve rendering
-    let curr = new Date(startDateStr);
-    const end = new Date(todayStr);
+    // Safely parse dates using local components to avoid timezone shift bugs
+    const [startYear, startMonth, startDay] = startDateStr.split('-').map(Number);
+    const [endYear, endMonth, endDay] = todayStr.split('-').map(Number);
+    
+    let curr = new Date(startYear, startMonth - 1, startDay);
+    const end = new Date(endYear, endMonth - 1, endDay);
+
+    let currentVal = baseEquity > 0 ? baseEquity : 0;
 
     while (curr <= end) {
-      const dateStr = curr.toISOString().split('T')[0];
+      const yyyy = curr.getFullYear();
+      const mm = String(curr.getMonth() + 1).padStart(2, '0');
+      const dd = String(curr.getDate()).padStart(2, '0');
+      const dateStr = `${yyyy}-${mm}-${dd}`;
       
       if (dailyMap[dateStr] !== undefined) {
         currentVal = dailyMap[dateStr];
@@ -701,18 +713,14 @@ const calculateEquityCurve = (realizedEventsList, statsObj, baseEquity) => {
       curr.setDate(curr.getDate() + 1);
     }
 
-    // Ensure the final live open portfolio value is accurately reflected at the tail end
-    const totalRealized = Object.values(statsObj).reduce((sum, st) => sum + st.realizedPL, 0);
-    const totalOpen = Object.values(statsObj).reduce((sum, st) => sum + (st.qty !== 0 && st.openPL ? st.openPL : 0), 0);
-    const livePortfolioVal = baseEquity > 0 ? (baseEquity + totalRealized + totalOpen) : (totalRealized + totalOpen);
-
-    if (fullCurveData.length > 0 && livePortfolioVal !== 0) {
-      fullCurveData[fullCurveData.length - 1].value = livePortfolioVal;
+    // Ensure the final data point matches the exact live portfolio value
+    if (fullCurveData.length > 0) {
+      fullCurveData[fullCurveData.length - 1].value = livePortfolioVal !== 0 ? livePortfolioVal : currentVal;
     }
 
     return fullCurveData;
   };
-
+  
   useEffect(() => {
     if (trades.length === 0) {
       setTickerStats({}); setMonthlyStats({}); setAnalyzedTrades([]); setEquityCurveData([]);

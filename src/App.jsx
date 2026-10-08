@@ -157,6 +157,18 @@ export default function App() {
 
   const [manualOptionPrices, setManualOptionPrices] = useState({});
 
+  // --- Calculator State ---
+  const [calcMode, setCalcMode] = useState('position');
+  const [calcTicker, setCalcTicker] = useState('');
+  const [isFetchingPrice, setIsFetchingPrice] = useState(false);
+  const [calcTotalCapital, setCalcTotalCapital] = useState('');
+  const [calcPositionPct, setCalcPositionPct] = useState('');
+  const [calcRiskPct, setCalcRiskPct] = useState('');
+  const [calcEntryPrice, setCalcEntryPrice] = useState('');
+  const [calcHighOfDay, setCalcHighOfDay] = useState(null);
+  const [calcLowOfDay, setCalcLowOfDay] = useState(null);
+  const [calcStopLoss, setCalcStopLoss] = useState('');
+
   // Handle Equity persistence per portfolio
   useEffect(() => {
     if (selectedPortfolio) {

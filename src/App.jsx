@@ -169,6 +169,36 @@ export default function App() {
   const [calcLowOfDay, setCalcLowOfDay] = useState(null);
   const [calcStopLoss, setCalcStopLoss] = useState('');
 
+// --- DB Equity Curve State ---
+  const [dbEquityCurve, setDbEquityCurve] = useState([]);
+  const [isCalculatingCurve, setIsCalculatingCurve] = useState(false);
+
+  // --- Fetch DB Equity Curve ---
+  const fetchEquityCurveFromDB = async () => {
+    if (!selectedPortfolio) return;
+    try {
+      const { data, error } = await supabase
+        .from('portfolio_equity_history')
+        .select('*')
+        .eq('portfolio', selectedPortfolio)
+        .order('record_date', { ascending: true });
+
+      if (error) throw error;
+
+      if (data) {
+        const formattedCurve = data.map(row => ({
+          time: row.record_date,
+          value: Number(row.total_equity),
+          cash: Number(row.cash_balance),
+          openValue: Number(row.open_market_value)
+        }));
+        setDbEquityCurve(formattedCurve);
+      }
+    } catch (error) { 
+      console.error("Error fetching DB equity curve:", error.message); 
+    }
+  };
+
   // Handle Equity persistence per portfolio
   useEffect(() => {
     if (selectedPortfolio) {
@@ -329,6 +359,7 @@ export default function App() {
       fetchTradesFromDB(); 
       fetchStopsFromDB(); 
       fetchNotesFromDB(); 
+      fetchEquityCurveFromDB();
     } 
   }, [startDate, endDate, isAuthenticated, selectedPortfolio]);
 
@@ -721,6 +752,46 @@ export default function App() {
     }
   };
 
+  const handleCalculateAndStoreEquity = async () => {
+    if (trades.length === 0) {
+      alert("No trades available to calculate.");
+      return;
+    }
+
+    setIsCalculatingCurve(true);
+    const parsedBaseEquity = parseFloat(accountEquity) || 0;
+    
+    // Generate the curve using your cash-based logic
+    const generatedCurve = calculateEquityCurve(trades, parsedBaseEquity);
+    
+    // Format for Supabase
+    const recordsToUpsert = generatedCurve.map(data => ({
+      portfolio: selectedPortfolio,
+      record_date: data.time,
+      cash_balance: parseFloat(data.cash.toFixed(2)),
+      open_market_value: parseFloat(data.openValue.toFixed(2)),
+      total_equity: parseFloat(data.value.toFixed(2))
+    }));
+
+    try {
+      const { error } = await supabase
+        .from('portfolio_equity_history')
+        .upsert(recordsToUpsert, { onConflict: 'portfolio, record_date' });
+        
+      if (error) throw error;
+      
+      alert(`Successfully calculated and saved ${recordsToUpsert.length} days of equity history!`);
+      // Re-fetch from DB to update the UI
+      fetchEquityCurveFromDB();
+      
+    } catch (err) {
+      console.error("Error storing equity history:", err.message);
+      alert("Failed to save equity curve to DB.");
+    } finally {
+      setIsCalculatingCurve(false);
+    }
+  };
+
   const calculateEquityCurve = (tradesList, baseEquity) => {
     if (!tradesList || tradesList.length === 0) return [];
 
@@ -791,12 +862,15 @@ export default function App() {
         }
       });
 
-      // 4. THE USER'S LOGIC: Total Equity = Cash + Open Market Value
+      // 4. Total Equity = Cash + Open Market Value
       const totalDayEquity = currentCash + openPositionsMarketValue;
 
+      // Push all 4 metrics so the database function can save them
       fullCurveData.push({
         time: dateStr,
-        value: totalDayEquity
+        value: totalDayEquity,
+        cash: currentCash,             
+        openValue: openPositionsMarketValue 
       });
 
       curr.setDate(curr.getDate() + 1);
@@ -1067,7 +1141,7 @@ export default function App() {
 
   // Handle Equity Curve Chart Init & Live Data Updates
   useEffect(() => {
-    if (isAuthenticated && equityChartContainerRef.current && activeTab === 'equityCurve' && equityCurveData.length > 0) {
+    if (isAuthenticated && equityChartContainerRef.current && activeTab === 'equityCurve' && dbEquityCurve.length > 0) { // <-- Change here
       if (!equityChartRef.current) {
         const chart = createChart(equityChartContainerRef.current, {
           width: equityChartContainerRef.current.clientWidth,
@@ -1076,22 +1150,17 @@ export default function App() {
           grid: { vertLines: { color: '#eee' }, horzLines: { color: '#eee' } },
         });
         const lineSeries = chart.addSeries(LineSeries, { color: '#1565c0', lineWidth: 2 });
-        lineSeries.setData(equityCurveData);
+        lineSeries.setData(dbEquityCurve); // <-- Change here
         chart.timeScale().fitContent();
         equityChartRef.current = chart; equitySeriesRef.current = lineSeries;
-
-        const resizeObserver = new ResizeObserver(entries => {
-          if (entries.length === 0 || entries[0].target !== equityChartContainerRef.current) return;
-          const newRect = entries[0].contentRect;
-          chart.applyOptions({ width: newRect.width, height: newRect.height });
-        });
-        resizeObserver.observe(equityChartContainerRef.current);
+        
+        // ... resize observer remains the same
       } else if (equitySeriesRef.current) {
-        equitySeriesRef.current.setData(equityCurveData);
+        equitySeriesRef.current.setData(dbEquityCurve); // <-- Change here
         equityChartRef.current.timeScale().fitContent();
       }
     }
-  }, [isAuthenticated, activeTab, equityCurveData]);
+  }, [isAuthenticated, activeTab, dbEquityCurve]); // <-- Change dependency
 
   useEffect(() => {
     if (!selectedTicker || activeTab !== 'chart') return;
@@ -1437,6 +1506,14 @@ export default function App() {
             style={{ padding: '8px 12px', backgroundColor: '#3949ab', color: 'white', border: 'none', borderRadius: '4px', cursor: isFetchingHistory ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 'bold' }}
           >
             {isFetchingHistory ? 'Downloading History...' : 'Fetch Price History'}
+          </button>
+
+          <button 
+            onClick={handleCalculateAndStoreEquity} 
+            disabled={isCalculatingCurve}
+            style={{ padding: '8px 12px', backgroundColor: '#607d8b', color: 'white', border: 'none', borderRadius: '4px', cursor: isCalculatingCurve ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 'bold' }}
+          >
+            {isCalculatingCurve ? 'Calculating...' : 'Calculate Equity Curve'}
           </button>
 
           <button onClick={() => { setManualTradePortfolio(selectedPortfolio); setIsManualEntryModalOpen(true); }} style={{ padding: '8px 12px', backgroundColor: '#43a047', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>Manual Entry</button>
@@ -2285,8 +2362,15 @@ export default function App() {
                         const monthLossRate = stat.tradesClosed > 0 ? ((stat.losingTrades / stat.tradesClosed) * 100).toFixed(1) + '%' : '0.0%';
                         const monthPF = stat.grossLoss === 0 ? (stat.grossProfit > 0 ? 'MAX' : '0.00') : (stat.grossProfit / stat.grossLoss).toFixed(2);
                         
+                        // PULL END OF MONTH EQUITY DIRECTLY FROM DB:
+                        // Find all days in the DB curve that match this month (e.g. "2024-09") and grab the last one.
+                        const monthDbData = dbEquityCurve.filter(d => d.time.startsWith(stat.monthKey));
+                        const eomEquityFromDB = monthDbData.length > 0 
+                          ? monthDbData[monthDbData.length - 1].value 
+                          : null;
+                        
                         return (
-                          <tr key={stat.monthKey} style={{ borderBottom: '1px solid #eee', backgroundColor: index % 2 === 0 ? '#fff' : '#fafafa', transition: 'background-color 0.2s' }} onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f1f8ff'} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = index % 2 === 0 ? '#fff' : '#fafafa'}>
+                          <tr key={stat.monthKey} style={{ borderBottom: '1px solid #eee', backgroundColor: index % 2 === 0 ? '#fff' : '#fafafa' }}>
                             <td style={{ padding: '12px 10px', fontWeight: 'bold', fontSize: '15px' }}>{stat.monthKey}</td>
                             <td style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 'bold' }}>{stat.tradesClosed}</td>
                             <td style={{ padding: '12px 10px', textAlign: 'right', color: parseFloat(monthWinRate) >= 50 ? '#2e7d32' : '#333', fontWeight: 'bold' }}>{monthWinRate}</td>
@@ -2295,7 +2379,9 @@ export default function App() {
                             <td style={{ padding: '12px 10px', textAlign: 'right', color: '#2e7d32' }}>+${stat.grossProfit.toFixed(2)}</td>
                             <td style={{ padding: '12px 10px', textAlign: 'right', color: '#d32f2f' }}>-${stat.grossLoss.toFixed(2)}</td>
                             <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold', fontSize: '15px' }}>{stat.realizedPL >= 0 ? '+' : '-'}${Math.abs(stat.realizedPL).toFixed(2)}</td>
-                            <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333', fontWeight: 'bold', fontSize: '15px' }}>{stat.eomEquity > 0 ? `$${stat.eomEquity.toFixed(2)}` : '--'}</td>
+                            <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333', fontWeight: 'bold', fontSize: '15px' }}>
+                              {eomEquityFromDB !== null ? `$${eomEquityFromDB.toFixed(2)}` : '--'}
+                            </td>
                           </tr>
                         );
                     })}

@@ -83,6 +83,17 @@ export default function App() {
   const [equityCurveData, setEquityCurveData] = useState([]);
   const [showClosedPositions, setShowClosedPositions] = useState(true);
   
+  // --- Historical Prices State ---
+  const [historicalPrices, setHistoricalPrices] = useState(() => {
+    try {
+      const saved = localStorage.getItem(`trade_journal_history_Default`);
+      return saved ? JSON.parse(saved) : {};
+    } catch (e) {
+      return {};
+    }
+  });
+  const [isFetchingHistory, setIsFetchingHistory] = useState(false);
+
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [historyFilter, setHistoryFilter] = useState('All');
@@ -137,27 +148,14 @@ export default function App() {
   const [manualTradeQty, setManualTradeQty] = useState('');
   const [manualTradePortfolio, setManualTradePortfolio] = useState('');
   const [manualTradeCommission, setManualTradeCommission] = useState('');
-  const [isSubmittingTrade, setIsSubmittingTrade] = useState(false); // <--- ADD THIS  
+  const [isSubmittingTrade, setIsSubmittingTrade] = useState(false); 
 
-  const [manualAssetType, setManualAssetType] = useState('stock'); // 'stock' or 'option'
-  const [manualOptionType, setManualOptionType] = useState('call'); // 'call' or 'put'
+  const [manualAssetType, setManualAssetType] = useState('stock'); 
+  const [manualOptionType, setManualOptionType] = useState('call'); 
   const [manualStrike, setManualStrike] = useState('');
   const [manualExpiration, setManualExpiration] = useState('');
 
-  // --- ADD IT HERE ---
   const [manualOptionPrices, setManualOptionPrices] = useState({});
-
-  // --- Calculator State ---
-  const [calcMode, setCalcMode] = useState('position');
-  const [calcTicker, setCalcTicker] = useState('');
-  const [calcTotalCapital, setCalcTotalCapital] = useState('');
-  const [calcPositionPct, setCalcPositionPct] = useState('');
-  const [calcRiskPct, setCalcRiskPct] = useState(''); 
-  const [calcEntryPrice, setCalcEntryPrice] = useState('');
-  const [calcStopLoss, setCalcStopLoss] = useState('');
-  const [isFetchingPrice, setIsFetchingPrice] = useState(false);
-  const [calcHighOfDay, setCalcHighOfDay] = useState(null); 
-  const [calcLowOfDay, setCalcLowOfDay] = useState(null); 
 
   // Handle Equity persistence per portfolio
   useEffect(() => {
@@ -166,6 +164,14 @@ export default function App() {
       const savedDate = localStorage.getItem(`trade_journal_equity_date_${selectedPortfolio}`);
       setAccountEquity(savedEquity || '');
       setEquityDate(savedDate || '');
+      
+      // Load specific cached history when portfolio changes
+      try {
+        const savedHistory = localStorage.getItem(`trade_journal_history_${selectedPortfolio}`);
+        setHistoricalPrices(savedHistory ? JSON.parse(savedHistory) : {});
+      } catch (e) {
+        setHistoricalPrices({});
+      }
     }
   }, [selectedPortfolio]);
 
@@ -188,7 +194,6 @@ export default function App() {
   };
 
   const isOptionTicker = (ticker) => {
-    // Checks if the ticker string contains a strike and a C/P designation (e.g. "150C" or "150 P")
     return /[0-9]+(\.[0-9]+)?[CP]\s*\(?/i.test(ticker);
   };
 
@@ -273,12 +278,13 @@ export default function App() {
       if (error) throw error;
 
       const formattedTrades = data.map(row => ({
-        id: row.id, // <--- INCLUDE SUPABASE ID HERE
+        id: row.id, 
         formattedDate: row.trade_date, 
         ticker: row.ticker, 
         'buy/sell': row.action, 
         price: Number(row.price), 
-        quantity: Number(row.quantity)
+        quantity: Number(row.quantity),
+        commission: Number(row.commission || 0)
       })).sort((a, b) => {
         const dateA = new Date(a.formattedDate); const dateB = new Date(b.formattedDate);
         if (dateA.getTime() === dateB.getTime()) {
@@ -438,10 +444,8 @@ export default function App() {
     const parsedQty = Math.abs(parseInt(manualTradeQty, 10));
     const parsedCommission = parseFloat(manualTradeCommission) || 0;
     
-    // Apply 100x multiplier if it's an option contract
     const multiplier = manualAssetType === 'option' ? 100 : 1;
 
-    // Format ticker name neatly for options (e.g. AAPL 150C (2026-06-19))
     let finalTicker = manualTradeTicker.toUpperCase().trim();
     if (manualAssetType === 'option') {
       finalTicker = `${finalTicker} ${manualStrike}${manualOptionType.toUpperCase()[0]} (${manualExpiration})`;
@@ -453,9 +457,9 @@ export default function App() {
       trade_date: manualTradeDate,
       ticker: finalTicker,
       action: manualTradeAction,
-      price: parsedPrice, // Raw entry price without commission baked in
-      quantity: parsedQty * multiplier, // Scaled by 100x for options
-      commission: parsedCommission // Saved separately for net P/L calculations
+      price: parsedPrice,
+      quantity: parsedQty * multiplier, 
+      commission: parsedCommission 
     };
 
     try {
@@ -466,11 +470,11 @@ export default function App() {
       setManualTradeTicker('');
       setManualTradePrice('');
       setManualTradeQty('');
-      setManualTradeCommission(''); // Reset to empty string
+      setManualTradeCommission(''); 
       setManualStrike('');
       setManualExpiration('');
       setManualAssetType('stock');
-      setManualTradeDate(getEasternDateString()); // Reset to current Eastern time date
+      setManualTradeDate(getEasternDateString()); 
       setManualTradeAction('buy');
       
       if (targetPortfolio === selectedPortfolio) {
@@ -492,7 +496,6 @@ export default function App() {
       [statId]: value
     }));
 
-    // Dynamically update tickerStats so openPL updates everywhere (Sidebar, Table, Summary)
     setTickerStats(prevStats => {
       const updated = { ...prevStats };
       if (updated[statId]) {
@@ -514,7 +517,7 @@ export default function App() {
   };
 
   const handleDeleteTrade = async (tradeId, e) => {
-    e.stopPropagation(); // Prevents triggering the parent click event (which selects the ticker chart)
+    e.stopPropagation(); 
     if (!window.confirm("Are you sure you want to delete this trade?")) return;
 
     try {
@@ -658,60 +661,144 @@ export default function App() {
     setOutlookIsFetching(false);
   };
 
-const calculateEquityCurve = (realizedEventsList, statsObj, baseEquity) => {
-    let runningEquity = baseEquity > 0 ? baseEquity : 0;
-    const dailyMap = {};
-
-    // 1. Process all realized events chronologically
-    if (realizedEventsList && realizedEventsList.length > 0) {
-      const sortedEvents = [...realizedEventsList].sort((a, b) => a.dateObj - b.dateObj);
-      sortedEvents.forEach(e => {
-        runningEquity += e.pl;
-        dailyMap[e.date] = runningEquity;
-      });
+  const handleDownloadHistoricalPrices = async () => {
+    if (trades.length === 0) {
+      alert("No trades found to fetch history for.");
+      return;
     }
 
-    const todayStr = getEasternDateString();
-    const totalRealized = Object.values(statsObj).reduce((sum, st) => sum + st.realizedPL, 0);
-    const totalOpen = Object.values(statsObj).reduce((sum, st) => sum + (st.qty !== 0 && st.openPL ? st.openPL : 0), 0);
-    const livePortfolioVal = baseEquity > 0 ? (baseEquity + totalRealized + totalOpen) : (totalRealized + totalOpen);
+    setIsFetchingHistory(true);
+    const uniqueTickers = [...new Set(trades.map(t => t.ticker.split(' ')[0]))];
+    const newHistory = { ...historicalPrices }; 
 
-    dailyMap[todayStr] = livePortfolioVal !== 0 ? livePortfolioVal : runningEquity;
+    try {
+      for (let ticker of uniqueTickers) {
+        const cleanTicker = ticker.split(' ')[0];
+        const fetchUrl = import.meta.env.PROD 
+          ? `/api/yahoo/${cleanTicker}?interval=1d&range=1y` 
+          : `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${cleanTicker}?interval=1d&range=1y`)}`;
 
-    const dates = Object.keys(dailyMap).sort();
-    if (dates.length === 0) return [];
+        const res = await fetch(fetchUrl);
+        const data = await res.json();
 
-    const startDateStr = dates[0];
-    const fullCurveData = [];
+        if (data.chart && data.chart.result && data.chart.result.length > 0) {
+          const result = data.chart.result[0];
+          const timestamps = result.timestamp;
+          const closes = result.indicators.quote[0].close;
+          
+          const priceMap = {};
+          for (let i = 0; i < timestamps.length; i++) {
+            if (closes[i] !== null && closes[i] !== undefined) {
+              const dateStr = new Date(timestamps[i] * 1000).toISOString().split('T')[0];
+              priceMap[dateStr] = closes[i];
+            }
+          }
+          newHistory[cleanTicker] = priceMap;
+        }
+        await new Promise(r => setTimeout(r, 300));
+      }
+
+      setHistoricalPrices(newHistory);
+      localStorage.setItem(`trade_journal_history_${selectedPortfolio}`, JSON.stringify(newHistory));
+      alert("Historical prices successfully downloaded and cached!");
+    } catch (err) {
+      console.error("Error fetching historical prices:", err);
+      alert("Failed to download historical prices.");
+    } finally {
+      setIsFetchingHistory(false);
+    }
+  };
+
+  const calculateEquityCurve = (tradesList, baseEquity) => {
+    if (!tradesList || tradesList.length === 0) return [];
+
+    const parsedBaseEquity = baseEquity > 0 ? baseEquity : 0;
     
+    // Sort all trades oldest to newest
+    const sortedTrades = [...tradesList].sort((a, b) => new Date(a.formattedDate) - new Date(b.formattedDate));
+    const startDateStr = sortedTrades[0].formattedDate;
+    const todayStr = getEasternDateString();
+
     const [startYear, startMonth, startDay] = startDateStr.split('-').map(Number);
     const [endYear, endMonth, endDay] = todayStr.split('-').map(Number);
     
     let curr = new Date(startYear, startMonth - 1, startDay);
     const end = new Date(endYear, endMonth - 1, endDay);
 
-    let currentVal = baseEquity > 0 ? baseEquity : 0;
+    const fullCurveData = [];
 
     while (curr <= end) {
       const yyyy = curr.getFullYear();
       const mm = String(curr.getMonth() + 1).padStart(2, '0');
       const dd = String(curr.getDate()).padStart(2, '0');
       const dateStr = `${yyyy}-${mm}-${dd}`;
-      
-      if (dailyMap[dateStr] !== undefined) {
-        currentVal = dailyMap[dateStr];
-      }
-      
+
+      // 1. Determine all trades that occurred ON or BEFORE this calendar day
+      const activeTradesSoFar = sortedTrades.filter(t => t.formattedDate <= dateStr);
+
+      // 2. Simulate open positions and realized cash exactly up to this day
+      let cumulativeRealizedPL = 0;
+      const positionInventory = {}; 
+
+      activeTradesSoFar.forEach(trade => {
+        const tkr = trade.ticker;
+        if (!positionInventory[tkr]) {
+          positionInventory[tkr] = { 
+            qty: 0, cost: 0, avgCost: 0, 
+            type: trade['buy/sell'] === 'sell' ? 'SHORT' : 'LONG' 
+          };
+        }
+        
+        const pos = positionInventory[tkr];
+        const isShort = pos.type === 'SHORT';
+        const isEntry = isShort ? trade['buy/sell'] === 'sell' : trade['buy/sell'] === 'buy';
+
+        if (isEntry) {
+          pos.cost += (trade.price * trade.quantity);
+          pos.qty += trade.quantity;
+          pos.avgCost = pos.cost / pos.qty;
+        } else {
+          const closedQty = Math.min(trade.quantity, pos.qty);
+          const pl = isShort 
+            ? closedQty * (pos.avgCost - trade.price)
+            : closedQty * (trade.price - pos.avgCost);
+            
+          cumulativeRealizedPL += pl - (trade.commission || 0);
+          pos.qty -= closedQty;
+          pos.cost -= (pos.avgCost * closedQty);
+          
+          if (pos.qty <= 0) {
+            pos.qty = 0; pos.cost = 0; pos.type = null; 
+          }
+        }
+      });
+
+      // 3. Mark-to-market all open positions using the cached daily historical prices
+      Object.keys(positionInventory).forEach(tkr => {
+        const pos = positionInventory[tkr];
+        if (pos.qty > 0) {
+          const cleanTkr = tkr.split(' ')[0];
+          // Look up historical price; fallback to cost basis if missing
+          const dayPrice = historicalPrices[cleanTkr]?.[dateStr] || pos.avgCost;
+          
+          const openPL = pos.type === 'SHORT'
+            ? (pos.avgCost - dayPrice) * pos.qty
+            : (dayPrice - pos.avgCost) * pos.qty;
+            
+          cumulativeRealizedPL += openPL; 
+        }
+      });
+
+      const totalDayEquity = parsedBaseEquity > 0 
+        ? parsedBaseEquity + cumulativeRealizedPL 
+        : cumulativeRealizedPL;
+
       fullCurveData.push({
         time: dateStr,
-        value: currentVal
+        value: totalDayEquity
       });
 
       curr.setDate(curr.getDate() + 1);
-    }
-
-    if (fullCurveData.length > 0) {
-      fullCurveData[fullCurveData.length - 1].value = livePortfolioVal !== 0 ? livePortfolioVal : currentVal;
     }
 
     return fullCurveData;
@@ -884,8 +971,8 @@ const calculateEquityCurve = (realizedEventsList, statsObj, baseEquity) => {
         mStats[key].eomEquity = parsedBaseEquity > 0 ? parsedBaseEquity + runningPL : 0;
     });
 
-    // Initial Equity Curve generation
-    const initialEquityCurve = calculateEquityCurve(realizedEvents, stats, parsedBaseEquity);
+    // Mark-to-Market Equity Curve generation using historical data
+    const initialEquityCurve = calculateEquityCurve(trades, parsedBaseEquity);
     setEquityCurveData(initialEquityCurve);
 
     setMonthlyStats(mStats); setAnalyzedTrades(enrichedTradesList);
@@ -940,7 +1027,7 @@ const calculateEquityCurve = (realizedEventsList, statsObj, baseEquity) => {
           setTickerStats({ ...stats }); 
           
           // Re-sync equity curve with current live open P/L values
-          const updatedCurve = calculateEquityCurve(realizedEvents, stats, parsedBaseEquity);
+          const updatedCurve = calculateEquityCurve(trades, parsedBaseEquity);
           setEquityCurveData(updatedCurve);
 
           await new Promise(r => setTimeout(r, 200));
@@ -948,7 +1035,7 @@ const calculateEquityCurve = (realizedEventsList, statsObj, baseEquity) => {
       } catch (error) {}
     };
     fetchCurrentPrices();
-  }, [trades, accountEquity, equityDate]);
+  }, [trades, accountEquity, equityDate, historicalPrices]);
 
   // Handle Chart Initialization & Resize Logic
   useEffect(() => {
@@ -1209,7 +1296,6 @@ const calculateEquityCurve = (realizedEventsList, statsObj, baseEquity) => {
 
       const breakEvenPct = !isClosed && stat.currentPrice > 0 ? ((breakEvenPrice / stat.currentPrice) - 1) * 100 : null;
       
-      // Inside your sidebar mapping for open positions:
       const manualOverride = parseFloat(manualOptionPrices[stat.id]);
       const effectiveCurrentPrice = !isNaN(manualOverride) ? manualOverride : (stat.currentPrice || 0);
 
@@ -1295,7 +1381,6 @@ const calculateEquityCurve = (realizedEventsList, statsObj, baseEquity) => {
   };
   // ============================================================================
 
-
   if (!isAuthenticated) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', backgroundColor: '#f5f5f5', fontFamily: 'sans-serif' }}>
@@ -1344,6 +1429,15 @@ const calculateEquityCurve = (realizedEventsList, statsObj, baseEquity) => {
           <button onClick={() => setIsEntryMethodModalOpen(true)} style={{ padding: '8px 12px', backgroundColor: '#8e24aa', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>Entry Methods</button>
           <button onClick={() => setIsFeedbackModalOpen(true)} style={{ padding: '8px 12px', backgroundColor: '#00897b', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>Feedback Tags</button>
           <button onClick={handleExportCSV} style={{ padding: '8px 12px', backgroundColor: '#1565c0', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>Export Journal</button>
+          
+          <button 
+            onClick={handleDownloadHistoricalPrices} 
+            disabled={isFetchingHistory} 
+            style={{ padding: '8px 12px', backgroundColor: '#3949ab', color: 'white', border: 'none', borderRadius: '4px', cursor: isFetchingHistory ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 'bold' }}
+          >
+            {isFetchingHistory ? 'Downloading History...' : 'Fetch Price History'}
+          </button>
+
           <button onClick={() => { setManualTradePortfolio(selectedPortfolio); setIsManualEntryModalOpen(true); }} style={{ padding: '8px 12px', backgroundColor: '#43a047', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>Manual Entry</button>
           <button onClick={() => setIsUploadModalOpen(true)} style={{ padding: '8px 12px', backgroundColor: '#5c6bc0', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>Upload Transaction</button>
           

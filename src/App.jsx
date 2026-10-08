@@ -774,24 +774,28 @@ export default function App() {
     }));
 
     try {
+      // FIX: Removed the space between the column names in onConflict
       const { error } = await supabase
         .from('portfolio_equity_history')
-        .upsert(recordsToUpsert, { onConflict: 'portfolio, record_date' });
+        .upsert(recordsToUpsert, { onConflict: 'portfolio,record_date' });
         
-      if (error) throw error;
+      if (error) {
+        console.error("Supabase Error Details:", error);
+        throw error;
+      }
       
       alert(`Successfully calculated and saved ${recordsToUpsert.length} days of equity history!`);
-      // Re-fetch from DB to update the UI
       fetchEquityCurveFromDB();
       
     } catch (err) {
-      console.error("Error storing equity history:", err.message);
-      alert("Failed to save equity curve to DB.");
+      console.error("Error storing equity history:", err);
+      // FIX: Alert now shows the exact database error message for easier debugging
+      alert(`Failed to save to DB: ${err.message || 'Unknown error. Check console.'}`);
     } finally {
       setIsCalculatingCurve(false);
     }
   };
-
+  
   const calculateEquityCurve = (tradesList, baseEquity) => {
     if (!tradesList || tradesList.length === 0) return [];
 

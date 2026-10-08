@@ -726,7 +726,7 @@ export default function App() {
 
     const parsedBaseEquity = baseEquity > 0 ? baseEquity : 0;
     
-    // Sort all trades oldest to newest
+    // Sort all trades chronologically oldest to newest
     const sortedTrades = [...tradesList].sort((a, b) => new Date(a.formattedDate) - new Date(b.formattedDate));
     const startDateStr = sortedTrades[0].formattedDate;
     const todayStr = getEasternDateString();
@@ -739,71 +739,60 @@ export default function App() {
 
     const fullCurveData = [];
 
+    // Loop through every single calendar day from your first trade to today
     while (curr <= end) {
       const yyyy = curr.getFullYear();
       const mm = String(curr.getMonth() + 1).padStart(2, '0');
       const dd = String(curr.getDate()).padStart(2, '0');
       const dateStr = `${yyyy}-${mm}-${dd}`;
 
-      // 1. Determine all trades that occurred ON or BEFORE this calendar day
+      // 1. Get all trades that happened ON or BEFORE this specific day
       const activeTradesSoFar = sortedTrades.filter(t => t.formattedDate <= dateStr);
 
-      // 2. Simulate open positions and realized cash exactly up to this day
-      let cumulativeRealizedPL = 0;
-      const positionInventory = {}; 
+      // 2. Calculate your exact Cash Balance up to this day
+      let currentCash = parsedBaseEquity;
+      const inventory = {}; // Tracks how many shares you hold of each ticker
 
       activeTradesSoFar.forEach(trade => {
         const tkr = trade.ticker;
-        if (!positionInventory[tkr]) {
-          positionInventory[tkr] = { 
-            qty: 0, cost: 0, avgCost: 0, 
-            type: trade['buy/sell'] === 'sell' ? 'SHORT' : 'LONG' 
-          };
+        if (!inventory[tkr]) inventory[tkr] = { qty: 0, totalCost: 0 };
+
+        const tradeValue = trade.price * trade.quantity;
+        const commission = trade.commission || 0;
+
+        if (trade['buy/sell'] === 'buy') {
+          currentCash -= tradeValue; // Buying reduces cash
+          currentCash -= commission; // Commission reduces cash
+          inventory[tkr].qty += trade.quantity; // Positive shares (Long)
+          inventory[tkr].totalCost += tradeValue; 
+        } else if (trade['buy/sell'] === 'sell') {
+          currentCash += tradeValue; // Selling increases cash
+          currentCash -= commission; // Commission reduces cash
+          inventory[tkr].qty -= trade.quantity; // Negative shares (Short)
+          inventory[tkr].totalCost -= tradeValue;
         }
+      });
+
+      // 3. Calculate Market Value of Open Positions for this specific day
+      let openPositionsMarketValue = 0;
+      
+      Object.keys(inventory).forEach(tkr => {
+        const pos = inventory[tkr];
         
-        const pos = positionInventory[tkr];
-        const isShort = pos.type === 'SHORT';
-        const isEntry = isShort ? trade['buy/sell'] === 'sell' : trade['buy/sell'] === 'buy';
-
-        if (isEntry) {
-          pos.cost += (trade.price * trade.quantity);
-          pos.qty += trade.quantity;
-          pos.avgCost = pos.cost / pos.qty;
-        } else {
-          const closedQty = Math.min(trade.quantity, pos.qty);
-          const pl = isShort 
-            ? closedQty * (pos.avgCost - trade.price)
-            : closedQty * (trade.price - pos.avgCost);
-            
-          cumulativeRealizedPL += pl - (trade.commission || 0);
-          pos.qty -= closedQty;
-          pos.cost -= (pos.avgCost * closedQty);
+        if (pos.qty !== 0) {
+          const cleanTkr = tkr.split(' ')[0]; // Strip options/dates to match Yahoo History
           
-          if (pos.qty <= 0) {
-            pos.qty = 0; pos.cost = 0; pos.type = null; 
-          }
+          // Fallback: If it's a weekend or missing data, estimate value via cost basis
+          const fallbackPrice = Math.abs(pos.totalCost / pos.qty); 
+          const dayPrice = historicalPrices[cleanTkr]?.[dateStr] || fallbackPrice;
+          
+          // Qty is positive for Longs, negative for Shorts. Math works perfectly for both.
+          openPositionsMarketValue += (pos.qty * dayPrice);
         }
       });
 
-      // 3. Mark-to-market all open positions using the cached daily historical prices
-      Object.keys(positionInventory).forEach(tkr => {
-        const pos = positionInventory[tkr];
-        if (pos.qty > 0) {
-          const cleanTkr = tkr.split(' ')[0];
-          // Look up historical price; fallback to cost basis if missing
-          const dayPrice = historicalPrices[cleanTkr]?.[dateStr] || pos.avgCost;
-          
-          const openPL = pos.type === 'SHORT'
-            ? (pos.avgCost - dayPrice) * pos.qty
-            : (dayPrice - pos.avgCost) * pos.qty;
-            
-          cumulativeRealizedPL += openPL; 
-        }
-      });
-
-      const totalDayEquity = parsedBaseEquity > 0 
-        ? parsedBaseEquity + cumulativeRealizedPL 
-        : cumulativeRealizedPL;
+      // 4. THE USER'S LOGIC: Total Equity = Cash + Open Market Value
+      const totalDayEquity = currentCash + openPositionsMarketValue;
 
       fullCurveData.push({
         time: dateStr,
@@ -815,7 +804,7 @@ export default function App() {
 
     return fullCurveData;
   };
-    
+
   useEffect(() => {
     if (trades.length === 0) {
       setTickerStats({}); setMonthlyStats({}); setAnalyzedTrades([]); setEquityCurveData([]);

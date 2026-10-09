@@ -114,6 +114,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('chart');
 
   const [expandedMonth, setExpandedMonth] = useState(null);
+  const [expandedSortConfig, setExpandedSortConfig] = useState({ key: 'date', direction: 'desc' }); // Default sorts by newest date
 
   // --- Refs ---
   const chartContainerRef = useRef();
@@ -247,6 +248,14 @@ export default function App() {
       direction = 'desc';
     }
     setSortConfig({ key, direction });
+  };
+
+  const requestExpandedSort = (key) => {
+    let direction = 'asc';
+    if (expandedSortConfig.key === key && expandedSortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setExpandedSortConfig({ key, direction });
   };
 
   // --- DB FETCHING FUNCTIONS ---
@@ -1482,6 +1491,19 @@ export default function App() {
           </th>
       );
   };
+  const renderExpandedTH = (label, sortKey, align) => {
+      const isActive = expandedSortConfig.key === sortKey;
+      return (
+          <th onClick={() => requestExpandedSort(sortKey)} style={{ padding: '8px', textAlign: align, color: '#555', cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start' }}>
+                  {label}
+                  <span style={{ marginLeft: '4px', fontSize: '10px', color: isActive ? '#1565c0' : 'transparent' }}>
+                      {isActive && expandedSortConfig.direction === 'desc' ? '▼' : '▲'}
+                  </span>
+              </div>
+          </th>
+      );
+  };
   // ============================================================================
 
   if (!isAuthenticated) {
@@ -2435,28 +2457,38 @@ export default function App() {
                                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', backgroundColor: '#fff', borderRadius: '4px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
                                     <thead style={{ backgroundColor: '#e0e0e0' }}>
                                       <tr>
-                                        <th style={{ padding: '8px', textAlign: 'left', color: '#555' }}>Date</th>
-                                        <th style={{ padding: '8px', textAlign: 'left', color: '#555' }}>Ticker</th>
-                                        <th style={{ padding: '8px', textAlign: 'right', color: '#555' }}>Qty</th>
-                                        <th style={{ padding: '8px', textAlign: 'right', color: '#555' }}>Exit Price</th>
-                                        <th style={{ padding: '8px', textAlign: 'right', color: '#555' }}>Net P/L ($)</th>
-                                        <th style={{ padding: '8px', textAlign: 'right', color: '#555' }}>Net P/L (%)</th>
+                                        {renderExpandedTH('Date', 'date', 'left')}
+                                        {renderExpandedTH('Ticker', 'ticker', 'left')}
+                                        {renderExpandedTH('Qty', 'qty', 'right')}
+                                        {renderExpandedTH('Exit Price', 'price', 'right')}
+                                        {renderExpandedTH('Net P/L ($)', 'pl', 'right')}
+                                        {renderExpandedTH('Net P/L (%)', 'plPct', 'right')}
                                       </tr>
                                     </thead>
                                     <tbody>
-                                      {stat.closedTradesList.map((ct, idx) => (
-                                        <tr key={idx} style={{ borderBottom: '1px solid #eee' }}>
-                                          <td style={{ padding: '8px' }}>{ct.date}</td>
-                                          <td style={{ padding: '8px', fontWeight: 'bold', color: '#1565c0' }}>{ct.ticker} <span style={{fontSize:'10px', color:'#888', fontWeight:'normal'}}>#{ct.positionNum}</span></td>
-                                          <td style={{ padding: '8px', textAlign: 'right' }}>{ct.qty}</td>
-                                          <td style={{ padding: '8px', textAlign: 'right' }}>${ct.price.toFixed(2)}</td>
-                                          <td style={{ padding: '8px', textAlign: 'right', color: ct.pl >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>
-                                            {ct.pl >= 0 ? '+' : ''}${ct.pl.toFixed(2)}
-                                          </td>
-                                          <td style={{ padding: '8px', textAlign: 'right', color: ct.plPct >= 0 ? '#2e7d32' : '#d32f2f' }}>
-                                            {ct.plPct >= 0 ? '+' : ''}{(ct.plPct * 100).toFixed(2)}%
-                                          </td>
-                                        </tr>
+                                      {/* SORT THE DATA BEFORE MAPPING */}
+                                      {[...stat.closedTradesList]
+                                        .sort((a, b) => {
+                                          let valA = a[expandedSortConfig.key];
+                                          let valB = b[expandedSortConfig.key];
+                                          
+                                          if (valA < valB) return expandedSortConfig.direction === 'asc' ? -1 : 1;
+                                          if (valA > valB) return expandedSortConfig.direction === 'asc' ? 1 : -1;
+                                          return 0;
+                                        })
+                                        .map((ct, idx) => (
+                                          <tr key={idx} style={{ borderBottom: '1px solid #eee' }}>
+                                            <td style={{ padding: '8px' }}>{ct.date}</td>
+                                            <td style={{ padding: '8px', fontWeight: 'bold', color: '#1565c0' }}>{ct.ticker} <span style={{fontSize:'10px', color:'#888', fontWeight:'normal'}}>#{ct.positionNum}</span></td>
+                                            <td style={{ padding: '8px', textAlign: 'right' }}>{ct.qty}</td>
+                                            <td style={{ padding: '8px', textAlign: 'right' }}>${ct.price.toFixed(2)}</td>
+                                            <td style={{ padding: '8px', textAlign: 'right', color: ct.pl >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>
+                                              {ct.pl >= 0 ? '+' : ''}${ct.pl.toFixed(2)}
+                                            </td>
+                                            <td style={{ padding: '8px', textAlign: 'right', color: ct.plPct >= 0 ? '#2e7d32' : '#d32f2f' }}>
+                                              {ct.plPct >= 0 ? '+' : ''}{(ct.plPct * 100).toFixed(2)}%
+                                            </td>
+                                          </tr>
                                       ))}
                                     </tbody>
                                   </table>

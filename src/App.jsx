@@ -113,6 +113,8 @@ export default function App() {
   const [advancedStats, setAdvancedStats] = useState({ maxDD: 0, maxWinStreak: 0, maxLossStreak: 0, avgWinDays: 0, avgLossDays: 0 });
   const [activeTab, setActiveTab] = useState('chart');
 
+  const [expandedMonth, setExpandedMonth] = useState(null);
+
   // --- Refs ---
   const chartContainerRef = useRef();
   const chartRef = useRef(null);
@@ -826,7 +828,7 @@ export default function App() {
 
       // 2. Calculate your exact Cash Balance up to this day
       let currentCash = parsedBaseEquity;
-      const inventory = {}; 
+      const inventory = {}; 6
 
       activeTradesSoFar.forEach(trade => {
         const tkr = trade.ticker;
@@ -900,7 +902,7 @@ export default function App() {
 
     return fullCurveData;
   };
-  
+
   useEffect(() => {
     if (trades.length === 0) {
       setTickerStats({}); setMonthlyStats({}); setAnalyzedTrades([]); setEquityCurveData([]);
@@ -1030,12 +1032,21 @@ export default function App() {
         }
 
         const yyyy = tradeDate.getFullYear(); const mm = String(tradeDate.getMonth() + 1).padStart(2, '0'); const monthKey = `${yyyy}-${mm}`; 
-        if (!mStats[monthKey]) mStats[monthKey] = { monthKey, realizedPL: 0, grossProfit: 0, grossLoss: 0, tradesClosed: 0, winningTrades: 0, losingTrades: 0, eomEquity: 0 };
-        
+        if (!mStats[monthKey]) mStats[monthKey] = { monthKey, realizedPL: 0, grossProfit: 0, grossLoss: 0, tradesClosed: 0, winningTrades: 0, losingTrades: 0, eomEquity: 0, closedTradesList: [] };
+
         if (isAfterEquityDate) {
           mStats[monthKey].realizedPL += pl; 
         }
         mStats[monthKey].tradesClosed++;
+        mStats[monthKey].closedTradesList.push({
+          ticker: trade.ticker,
+          positionNum: currentPosNum,
+          date: trade.formattedDate,
+          qty: trade.quantity,
+          price: trade.price,
+          pl: pl,
+          plPct: plPct
+        });
         
         if (pl > 0) mStats[monthKey].grossProfit += pl; 
         if (pl < 0) mStats[monthKey].grossLoss += Math.abs(pl); 
@@ -2392,21 +2403,69 @@ export default function App() {
                           : null;
                         
                         return (
-                          <tr key={stat.monthKey} style={{ borderBottom: '1px solid #eee', backgroundColor: index % 2 === 0 ? '#fff' : '#fafafa' }}>
-                            <td style={{ padding: '12px 10px', fontWeight: 'bold', fontSize: '15px' }}>{stat.monthKey}</td>
-                            <td style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 'bold' }}>{stat.tradesClosed}</td>
-                            <td style={{ padding: '12px 10px', textAlign: 'right', color: parseFloat(monthWinRate) >= 50 ? '#2e7d32' : '#333', fontWeight: 'bold' }}>{monthWinRate}</td>
-                            <td style={{ padding: '12px 10px', textAlign: 'right', color: '#d32f2f', fontWeight: 'bold' }}>{monthLossRate}</td>
-                            <td style={{ padding: '12px 10px', textAlign: 'right', color: monthPF > 1 || monthPF === 'MAX' ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{monthPF}</td>
-                            <td style={{ padding: '12px 10px', textAlign: 'right', color: '#2e7d32' }}>+${stat.grossProfit.toFixed(2)}</td>
-                            <td style={{ padding: '12px 10px', textAlign: 'right', color: '#d32f2f' }}>-${stat.grossLoss.toFixed(2)}</td>
-                            <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold', fontSize: '15px' }}>{stat.realizedPL >= 0 ? '+' : '-'}${Math.abs(stat.realizedPL).toFixed(2)}</td>
-                            <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333', fontWeight: 'bold', fontSize: '15px' }}>
-                              {eomEquityFromDB !== null ? `$${eomEquityFromDB.toFixed(2)}` : '--'}
-                            </td>
-                          </tr>
+                          <React.Fragment key={stat.monthKey}>
+                            <tr style={{ borderBottom: '1px solid #eee', backgroundColor: index % 2 === 0 ? '#fff' : '#fafafa' }}>
+                              <td style={{ padding: '12px 10px', fontWeight: 'bold', fontSize: '15px' }}>{stat.monthKey}</td>
+                              
+                              {/* MAKE THIS CELL CLICKABLE */}
+                              <td 
+                                onClick={() => setExpandedMonth(expandedMonth === stat.monthKey ? null : stat.monthKey)}
+                                style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 'bold', color: '#1565c0', cursor: 'pointer', textDecoration: 'underline' }}
+                                title="Click to view closed trades"
+                              >
+                                {stat.tradesClosed}
+                              </td>
+
+                              <td style={{ padding: '12px 10px', textAlign: 'right', color: parseFloat(monthWinRate) >= 50 ? '#2e7d32' : '#333', fontWeight: 'bold' }}>{monthWinRate}</td>
+                              <td style={{ padding: '12px 10px', textAlign: 'right', color: '#d32f2f', fontWeight: 'bold' }}>{monthLossRate}</td>
+                              <td style={{ padding: '12px 10px', textAlign: 'right', color: monthPF > 1 || monthPF === 'MAX' ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>{monthPF}</td>
+                              <td style={{ padding: '12px 10px', textAlign: 'right', color: '#2e7d32' }}>+${stat.grossProfit.toFixed(2)}</td>
+                              <td style={{ padding: '12px 10px', textAlign: 'right', color: '#d32f2f' }}>-${stat.grossLoss.toFixed(2)}</td>
+                              <td style={{ padding: '12px 10px', textAlign: 'right', color: stat.realizedPL >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold', fontSize: '15px' }}>{stat.realizedPL >= 0 ? '+' : '-'}${Math.abs(stat.realizedPL).toFixed(2)}</td>
+                              <td style={{ padding: '12px 10px', textAlign: 'right', color: '#333', fontWeight: 'bold', fontSize: '15px' }}>
+                                {eomEquityFromDB !== null ? `$${eomEquityFromDB.toFixed(2)}` : '--'}
+                              </td>
+                            </tr>
+                            
+                            {/* THE NEW EXPANDED DETAILS ROW */}
+                            {expandedMonth === stat.monthKey && (
+                              <tr style={{ backgroundColor: '#f0f4f8' }}>
+                                <td colSpan="9" style={{ padding: '15px 20px', borderBottom: '2px solid #ccc' }}>
+                                  <h4 style={{ margin: '0 0 10px 0', color: '#333' }}>Closed Trades for {stat.monthKey}</h4>
+                                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', backgroundColor: '#fff', borderRadius: '4px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+                                    <thead style={{ backgroundColor: '#e0e0e0' }}>
+                                      <tr>
+                                        <th style={{ padding: '8px', textAlign: 'left', color: '#555' }}>Date</th>
+                                        <th style={{ padding: '8px', textAlign: 'left', color: '#555' }}>Ticker</th>
+                                        <th style={{ padding: '8px', textAlign: 'right', color: '#555' }}>Qty</th>
+                                        <th style={{ padding: '8px', textAlign: 'right', color: '#555' }}>Exit Price</th>
+                                        <th style={{ padding: '8px', textAlign: 'right', color: '#555' }}>Net P/L ($)</th>
+                                        <th style={{ padding: '8px', textAlign: 'right', color: '#555' }}>Net P/L (%)</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {stat.closedTradesList.map((ct, idx) => (
+                                        <tr key={idx} style={{ borderBottom: '1px solid #eee' }}>
+                                          <td style={{ padding: '8px' }}>{ct.date}</td>
+                                          <td style={{ padding: '8px', fontWeight: 'bold', color: '#1565c0' }}>{ct.ticker} <span style={{fontSize:'10px', color:'#888', fontWeight:'normal'}}>#{ct.positionNum}</span></td>
+                                          <td style={{ padding: '8px', textAlign: 'right' }}>{ct.qty}</td>
+                                          <td style={{ padding: '8px', textAlign: 'right' }}>${ct.price.toFixed(2)}</td>
+                                          <td style={{ padding: '8px', textAlign: 'right', color: ct.pl >= 0 ? '#2e7d32' : '#d32f2f', fontWeight: 'bold' }}>
+                                            {ct.pl >= 0 ? '+' : ''}${ct.pl.toFixed(2)}
+                                          </td>
+                                          <td style={{ padding: '8px', textAlign: 'right', color: ct.plPct >= 0 ? '#2e7d32' : '#d32f2f' }}>
+                                            {ct.plPct >= 0 ? '+' : ''}{(ct.plPct * 100).toFixed(2)}%
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
                         );
-                    })}
+                      })}
                   </tbody>
                 </table>
               )}

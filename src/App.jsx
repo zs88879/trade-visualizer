@@ -795,7 +795,7 @@ export default function App() {
       setIsCalculatingCurve(false);
     }
   };
-  
+
   const calculateEquityCurve = (tradesList, baseEquity) => {
     if (!tradesList || tradesList.length === 0) return [];
 
@@ -826,7 +826,7 @@ export default function App() {
 
       // 2. Calculate your exact Cash Balance up to this day
       let currentCash = parsedBaseEquity;
-      const inventory = {}; // Tracks how many shares you hold of each ticker
+      const inventory = {}; 
 
       activeTradesSoFar.forEach(trade => {
         const tkr = trade.ticker;
@@ -836,14 +836,14 @@ export default function App() {
         const commission = trade.commission || 0;
 
         if (trade['buy/sell'] === 'buy') {
-          currentCash -= tradeValue; // Buying reduces cash
-          currentCash -= commission; // Commission reduces cash
-          inventory[tkr].qty += trade.quantity; // Positive shares (Long)
+          currentCash -= tradeValue; 
+          currentCash -= commission; 
+          inventory[tkr].qty += trade.quantity; 
           inventory[tkr].totalCost += tradeValue; 
         } else if (trade['buy/sell'] === 'sell') {
-          currentCash += tradeValue; // Selling increases cash
-          currentCash -= commission; // Commission reduces cash
-          inventory[tkr].qty -= trade.quantity; // Negative shares (Short)
+          currentCash += tradeValue; 
+          currentCash -= commission; 
+          inventory[tkr].qty -= trade.quantity; 
           inventory[tkr].totalCost -= tradeValue;
         }
       });
@@ -857,11 +857,30 @@ export default function App() {
         if (pos.qty !== 0) {
           const cleanTkr = tkr.split(' ')[0]; // Strip options/dates to match Yahoo History
           
-          // Fallback: If it's a weekend or missing data, estimate value via cost basis
-          const fallbackPrice = Math.abs(pos.totalCost / pos.qty); 
-          const dayPrice = historicalPrices[cleanTkr]?.[dateStr] || fallbackPrice;
+          let dayPrice = historicalPrices[cleanTkr]?.[dateStr];
+
+          // NEW LOGIC: If it's a weekend/holiday, look backward up to 7 days for the last closing price
+          if (dayPrice === undefined) {
+            let lookback = new Date(curr);
+            for (let i = 1; i <= 7; i++) {
+              lookback.setDate(lookback.getDate() - 1);
+              const lbYyyy = lookback.getFullYear();
+              const lbMm = String(lookback.getMonth() + 1).padStart(2, '0');
+              const lbDd = String(lookback.getDate()).padStart(2, '0');
+              const lbDateStr = `${lbYyyy}-${lbMm}-${lbDd}`;
+              
+              if (historicalPrices[cleanTkr]?.[lbDateStr] !== undefined) {
+                dayPrice = historicalPrices[cleanTkr][lbDateStr];
+                break;
+              }
+            }
+          }
           
-          // Qty is positive for Longs, negative for Shorts. Math works perfectly for both.
+          // Absolute fallback if no history exists at all (e.g., IPO day mismatch)
+          if (dayPrice === undefined) {
+             dayPrice = Math.abs(pos.totalCost / pos.qty); 
+          }
+          
           openPositionsMarketValue += (pos.qty * dayPrice);
         }
       });
@@ -869,7 +888,6 @@ export default function App() {
       // 4. Total Equity = Cash + Open Market Value
       const totalDayEquity = currentCash + openPositionsMarketValue;
 
-      // Push all 4 metrics so the database function can save them
       fullCurveData.push({
         time: dateStr,
         value: totalDayEquity,
@@ -882,7 +900,7 @@ export default function App() {
 
     return fullCurveData;
   };
-
+  
   useEffect(() => {
     if (trades.length === 0) {
       setTickerStats({}); setMonthlyStats({}); setAnalyzedTrades([]); setEquityCurveData([]);
